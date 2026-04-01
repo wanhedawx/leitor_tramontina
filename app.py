@@ -17,7 +17,7 @@ URL_PLANILHA = "https://docs.google.com/spreadsheets/d/15WpiV3mW0dE9PjXiZ6imU1kJ
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- CARREGAMENTO DE DADOS (Lê do Google) ---
-@st.cache_data(ttl=60) # Atualiza a cada 1 minuto
+@st.cache_data(ttl=15)
 def carregar_base(aba):
     return conn.read(spreadsheet=URL_PLANILHA, worksheet=aba)
 
@@ -39,7 +39,7 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Leitor de Pedidos Automático</h1>", unsafe_allow_html=True)
 
 # Menu principal
-menu = st.tabs(["📄 Processar Pedido", "📦 Gerenciar SKUs/Itens", "🏭 Fábricas & Descontos"])
+menu = st.tabs(["📄 Processar Pedido", "📦 Gerenciar SKUs/Clientes", "🏭 Fábricas & Descontos"])
 
 with menu[0]:
     # Lógica de processamento (Igual à anterior, mas usando carregar_base)
