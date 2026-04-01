@@ -63,13 +63,13 @@ def identificar_fabrica(texto):
 def processar_pedido(texto, layout, f_info):
     itens = []
     # Lógica de extração simplificada
-    if layout == "palato":
+    if layout == "Palato":
         for linha in texto.splitlines():
             if "Tramontina" in linha:
                 sku = re.search(r"\b\d{7,8}\b", linha)
                 qtd = re.search(r"\s(\d+)\s+(CX|UN)/", linha)
                 if sku and qtd: itens.append({"sku": sku.group(), "quantidade": int(qtd.group(1))})
-    elif layout == "carajas":
+    elif layout == "Carajas":
         for linha in texto.splitlines():
             m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
             if m: itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
