@@ -12,7 +12,7 @@ st.set_page_config(page_title="Tramontina - Gestor de Pedidos", layout="centered
 
 # URL da sua Planilha do Google (deve estar com acesso 'Qualquer pessoa com o link')
 # Dica: Na planilha, crie as abas: 'clientes', 'fabricas', 'embalagem'
-URL_PLANILHA = "SUA_URL_DO_GOOGLE_SHEETS_AQUI"
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/15WpiV3mW0dE9PjXiZ6imU1kJcG3fqu2RMxiFPlb0RBY/edit?gid=1143981262#gid=1143981262"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
