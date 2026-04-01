@@ -12,7 +12,7 @@ INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 LOGO_PATH = INFOS_DIR / "logo.png"
 
-st.set_page_config(page_title="Leitor de Pedidos Tramontina", page_icon="📄", layout="centered")
+st.set_page_config(page_title="Processador de Pedidos Tramontina", page_icon="📄", layout="centered")
 
 # --- FUNÇÕES DE BANCO DE DADOS (EXCEL) ---
 def salvar_na_planilha(aba, novo_dado_dict):
@@ -111,7 +111,7 @@ if st.button("🚀 Processar Pedido", use_container_width=True, type="primary", 
 # --- SEÇÃO DE GERENCIAMENTO (O QUE VOCÊ PEDIU) ---
 st.write("")
 st.write("---")
-with st.expander("📂 Gerenciar Base de Dados (Adicionar Clientes/Itens)"):
+with st.expander("📂 Gerenciar Clientes/Produtos"):
     tab1, tab2 = st.tabs(["🆕 Novo Cliente", "📦 Novo Item/Embalagem"])
     
     with tab1:
