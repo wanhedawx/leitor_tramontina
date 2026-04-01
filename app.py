@@ -120,7 +120,7 @@ with st.expander("📂 Gerenciar Clientes/Itens"):
     with tab1:
         with st.form("add_cliente"):
             n_nome = st.text_input("Nome do Cliente")
-            n_layout = st.selectbox("Layout", ["carajas", "palato", "casa_vieira"])
+            n_layout = st.selectbox("Layout", ["Carajas", "Palato", "Casa Vieira"])
             if st.form_submit_button("Salvar"):
                 if n_nome:
                     novo = {"cnpj_cliente": "", "cliente": n_nome, "layout": n_layout, "regra_embalagem": "padrão"}
