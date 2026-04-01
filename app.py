@@ -1,10 +1,12 @@
 import io
 import re
 from pathlib import Path
+from PIL import Image
 
 import pandas as pd
 import pdfplumber
 import streamlit as st
+import os
 
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
@@ -13,12 +15,12 @@ LOGO_PATH = INFOS_DIR / "logo.png"
 
 
 # =========================
-# CONFIG DA PÁGINA
+# CONFIG DA PÁGINA (Atualizado para Wide)
 # =========================
 st.set_page_config(
     page_title="Leitor de Pedidos Tramontina",
     page_icon="📄",
-    layout="centered"
+    layout="wide" # Ocupa toda a largura da tela
 )
 
 
@@ -315,120 +317,3 @@ def montar_saida_casa_vieira(texto, regra_fabrica):
         r"^(\d{13})\s+"
         r"(\d{5,8})\s+"
         r"(\d+)\s+"
-        r"(.+?)\s+"
-        r"(\d+)\s+"
-        r"0,00\s+"
-        r"([\d\.,]+)\s+"
-        r"([\d\.,]+)$"
-    )
-
-    for linha in linhas:
-        linha = linha.strip()
-
-        m = padrao.match(linha)
-        if not m:
-            continue
-
-        sku = re.sub(r"\D", "", m.group(2))
-        quantidade = m.group(5)
-
-        itens.append({
-            "sku": sku,
-            "quantidade": pd.to_numeric(quantidade, errors="coerce"),
-        })
-
-    df = pd.DataFrame(itens)
-
-    if df.empty:
-        return df
-
-    df["origem"] = regra_fabrica["operacao"]
-    df["desconto"] = regra_fabrica["desconto"]
-
-    return df[["sku", "quantidade", "origem", "desconto"]]
-
-
-# =========================
-# PROCESSAMENTO
-# =========================
-def processar_pdf(texto, cliente_info, fabrica_info):
-    layout = cliente_info["layout"]
-
-    if layout == "palato":
-        return montar_saida_palato(texto, fabrica_info)
-
-    if layout == "carajas":
-        return montar_saida_carajas(texto, fabrica_info)
-
-    if layout == "casa_vieira":
-        return montar_saida_casa_vieira(texto, fabrica_info)
-
-    raise ValueError(f"Layout não tratado: {layout}")
-
-
-# =========================
-# INTERFACE WEB
-# =========================
-if LOGO_PATH.exists():
-    st.image(str(LOGO_PATH), width=180)
-
-st.title("Leitor de Pedidos Tramontina")
-st.caption("Selecione o cliente e envie o PDF do pedido.")
-
-if not CONFIG_PATH.exists():
-    st.error(f"Arquivo de configuração não encontrado: {CONFIG_PATH}")
-    st.stop()
-
-clientes = listar_clientes_para_tela()
-cliente_selecionado = st.selectbox("Cliente", clientes, index=None, placeholder="Selecione um cliente")
-arquivo_pdf = st.file_uploader("Pedido em PDF", type=["pdf"])
-
-if st.button("Processar pedido", type="primary", use_container_width=True):
-    if not cliente_selecionado:
-        st.warning("Selecione um cliente.")
-        st.stop()
-
-    if not arquivo_pdf:
-        st.warning("Envie um arquivo PDF.")
-        st.stop()
-
-    with st.spinner("Processando pedido..."):
-        pdf_bytes = arquivo_pdf.read()
-        texto = extrair_texto_pdf_bytes(pdf_bytes)
-
-        cliente_info = identificar_cliente_por_selecao(cliente_selecionado)
-        fabrica_info = identificar_fabrica_por_base(texto)
-
-        if fabrica_info is None:
-            st.error("Não foi possível identificar a fábrica Tramontina pela aba 'fabricas'.")
-            st.stop()
-
-        df_saida = processar_pdf(texto, cliente_info, fabrica_info)
-
-        if df_saida.empty:
-            st.error("Nenhum item foi extraído do PDF.")
-            st.stop()
-
-        numero_pedido = extrair_numero_pedido(texto)
-        nome_cliente = cliente_info["cliente"].replace("_", " ").title()
-        nome_arquivo = f"{nome_cliente} {numero_pedido}.xlsx"
-
-        excel_bytes = dataframe_para_excel_bytes(df_saida)
-
-        st.success("Pedido processado com sucesso.")
-        st.write(f"**Cliente:** {nome_cliente}")
-        st.write(f"**Layout:** {cliente_info['layout']}")
-        st.write(f"**Fábrica:** {fabrica_info['fabrica']}")
-        st.write(f"**Origem:** {fabrica_info['operacao']}")
-        st.write(f"**Desconto:** {fabrica_info['desconto']}")
-        st.write(f"**Itens:** {len(df_saida)}")
-
-        st.dataframe(df_saida, use_container_width=True)
-
-        st.download_button(
-            label="Baixar Excel",
-            data=excel_bytes,
-            file_name=nome_arquivo,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
