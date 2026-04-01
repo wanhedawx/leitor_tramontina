@@ -85,7 +85,7 @@ if LOGO_PATH.exists():
     _, col_img, _ = st.columns([1, 1, 1])
     col_img.image(Image.open(str(LOGO_PATH)), width=150)
 
-st.markdown("<h1 style='text-align: center;'>Leitor de Pedidos</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
 # INPUTS
