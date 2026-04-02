@@ -87,8 +87,8 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
             if not df_individual.empty:
                 # Adiciona coluna de origem para o consolidado
                 df_consolidado_parte = df_individual.copy()
-                df_consolidado_parte["arquivo_origem"] = arquivo.name
-                lista_dfs.append(df_consolidado_parte)
+                ome_limpo = Path(arquivo.name).stem  # remove .pdf
+                df_consolidado_parte["arquivo_origem"] = nome_limpo
                 
                 # Guarda o CSV individual (sem a coluna arquivo_origem para ficar limpo)
                 csv_buffer = io.StringIO()
