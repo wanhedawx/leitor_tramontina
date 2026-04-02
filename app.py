@@ -57,13 +57,19 @@ def processar_pedido(texto, layout, f_info):
     return df
 
 # --- INTERFACE ---
+# --- INTERFACE ---
+# Logo centralizada com colunas de suporte
 if LOGO_PATH.exists():
-    _, col_img, _ = st.columns([1, 1, 1])
-    col_img.image(Image.open(str(LOGO_PATH)), width=150)
+    # Criamos 3 colunas: a do meio (2) é onde a logo fica. 
+    # As laterais (1) servem apenas para empurrar a logo para o centro.
+    col_esq, col_logo, col_dir = st.columns([1, 2, 1])
+    
+    with col_logo:
+        # O parâmetro use_container_width=True ajuda a centralizar dentro da coluna
+        st.image(Image.open(str(LOGO_PATH)), width=180)
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
-
 clientes_df = carregar_aba("clientes")
 opcoes_clientes = {c.replace("_", " ").title(): c for c in clientes_df['cliente'].unique()}
 
