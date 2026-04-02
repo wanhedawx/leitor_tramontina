@@ -12,7 +12,7 @@ INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 LOGO_PATH = INFOS_DIR / "logo.png"
 
-st.set_page_config(page_title="Leitor de Pedidos Tramontina", page_icon="📄", layout="centered")
+st.set_page_config(page_title="Processador de Pedidos Tramontina", page_icon="📄", layout="centered")
 
 # --- FUNÇÕES DE BANCO DE DADOS (EXCEL) ---
 def salvar_na_planilha(aba, novo_dado_dict):
@@ -85,7 +85,7 @@ if LOGO_PATH.exists():
     _, col_img, _ = st.columns([1, 1, 1])
     col_img.image(Image.open(str(LOGO_PATH)), width=150)
 
-st.markdown("<h1 style='text-align: center;'>Leitor de Pedidos</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
 # INPUTS
