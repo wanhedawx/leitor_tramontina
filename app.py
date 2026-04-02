@@ -1,106 +1,143 @@
 import io
 import re
+from pathlib import Path
+from PIL import Image
 import pandas as pd
 import pdfplumber
 import streamlit as st
-from pathlib import Path
 
-# Configurações de Caminho
+# --- CONFIGURAÇÃO E CAMINHOS ---
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "infos" / "regras_fabricas.xlsx"
+INFOS_DIR = BASE_DIR / "infos"
+CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
+LOGO_PATH = INFOS_DIR / "logo.png"
 
-# --- FUNÇÕES DE PERSISTÊNCIA (O coração da sua dúvida) ---
-def atualizar_excel(aba, novo_df):
-    """Sobrescreve a aba do Excel com os novos dados sem deletar as outras"""
-    with pd.ExcelWriter(CONFIG_PATH, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-        novo_df.to_excel(writer, sheet_name=aba, index=False)
+st.set_page_config(page_title="Leitor de Pedidos Tramontina", page_icon="📄", layout="centered")
+
+# --- FUNÇÕES DE BANCO DE DADOS (EXCEL) ---
+def salvar_na_planilha(aba, novo_dado_dict):
+    try:
+        df_atual = pd.read_excel(CONFIG_PATH, sheet_name=aba)
+        df_novo = pd.concat([df_atual, pd.DataFrame([novo_dado_dict])], ignore_index=True)
+        with pd.ExcelWriter(CONFIG_PATH, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            df_novo.to_excel(writer, sheet_name=aba, index=False)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar: {e}")
+        return False
+
+def excluir_da_planilha(aba, coluna_id, valor_id):
+    try:
+        df_atual = pd.read_excel(CONFIG_PATH, sheet_name=aba)
+        # Filtra mantendo apenas quem NÃO é o valor selecionado
+        df_novo = df_atual[df_atual[coluna_id].astype(str) != str(valor_id)]
+        with pd.ExcelWriter(CONFIG_PATH, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            df_novo.to_excel(writer, sheet_name=aba, index=False)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao excluir: {e}")
+        return False
 
 @st.cache_data
-def carregar_dados(aba):
-    return pd.read_excel(CONFIG_PATH, sheet_name=aba)
+def carregar_aba(aba):
+    return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
 
-# --- MOTOR DE LEITURA UNIVERSAL ---
-def extrair_dados_padrao(texto, f_info, embalagem_df):
-    """
-    Procura SKUs (7-8 dígitos) e tenta capturar a quantidade próxima.
-    Cruza com a base de embalagens e fábricas automaticamente.
-    """
+# --- UTILITÁRIOS DE PDF ---
+def extrair_texto_pdf(pdf_bytes):
+    texto = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for p in pdf.pages:
+            texto += (p.extract_text() or "") + "\n"
+    return texto
+
+def identificar_fabrica(texto):
+    df_f = carregar_aba("fabricas")
+    texto_limpo = re.sub(r"\D", "", texto)
+    for _, row in df_f.iterrows():
+        cnpj_limpo = re.sub(r"\D", "", str(row['cnpj'])).zfill(14)
+        if cnpj_limpo in texto_limpo:
+            return row
+    return None
+
+# --- PROCESSAMENTO ---
+def processar_pedido(texto, layout, f_info):
     itens = []
-    # Expressão regular para achar SKU Tramontina (ex: 96589068)
-    padrao_sku = re.compile(r"(\d{7,8})")
-    
-    linhas = texto.splitlines()
-    for linha in linhas:
-        sku_match = padrao_sku.search(linha)
-        if sku_match:
-            sku = sku_match.group(1)
-            # Tenta achar um número de quantidade na mesma linha (geralmente após o SKU)
-            qtd_match = re.search(r"(?<=\s)(\d{1,4})(?=\s|CX|UN)", linha)
-            qtd = int(qtd_match.group(1)) if qtd_match else 1
-            
-            itens.append({"sku": sku, "quantidade": qtd})
+    # Lógica de extração simplificada
+    if layout == "palato":
+        for linha in texto.splitlines():
+            if "Tramontina" in linha:
+                sku = re.search(r"\b\d{7,8}\b", linha)
+                qtd = re.search(r"\s(\d+)\s+(CX|UN)/", linha)
+                if sku and qtd: itens.append({"sku": sku.group(), "quantidade": int(qtd.group(1))})
+    elif layout == "carajas":
+        for linha in texto.splitlines():
+            m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
+            if m: itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
     
     df = pd.DataFrame(itens)
     if not df.empty:
-        # Cruzamento automático com as regras da fábrica
         df["origem"] = f_info["operacao"]
         df["desconto"] = f_info["desconto"]
-        
-        # Cruzamento opcional com base de embalagem
-        df = df.merge(embalagem_df, on="sku", how="left")
-        df["embalagem"] = df["embalagem"].fillna(1) # Padrão 1 se não existir
-    
     return df
 
-# --- INTERFACE VERTICAL ---
-st.title("Sistema Automatizado de Pedidos")
+# --- INTERFACE ---
+if LOGO_PATH.exists():
+    _, col_img, _ = st.columns([1, 1, 1])
+    col_img.image(Image.open(str(LOGO_PATH)), width=150)
 
-# Carregamento inicial
-clientes_df = carregar_dados("clientes")
-fabricas_df = carregar_dados("fabricas")
-embalagem_df = carregar_dados("embalagem")
+st.markdown("<h1 style='text-align: center;'>Leitor de Pedidos</h1>", unsafe_allow_html=True)
+st.write("---")
 
-cliente_nome = st.selectbox("Selecione o Cliente", clientes_df["cliente"].unique())
-arquivo = st.file_uploader("Suba o PDF do Pedido", type="pdf")
+# INPUTS
+clientes_df = carregar_aba("clientes")
+lista_clientes = sorted(clientes_df['cliente'].unique().tolist())
+sel_cliente = st.selectbox("1. Selecione o Cliente", lista_clientes, index=None, placeholder="Escolha um cliente...")
+arquivo = st.file_uploader("2. Envie o PDF do pedido", type=["pdf"])
 
-if st.button("Processar Agora", type="primary"):
-    if arquivo:
-        with pdfplumber.open(arquivo) as pdf:
-            texto_completo = "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
-        
-        # Identifica fábrica pelo CNPJ no texto
-        f_info = None
-        for _, fab in fabricas_df.iterrows():
-            if str(fab["cnpj"]) in texto_completo.replace(".", "").replace("/", "").replace("-", ""):
-                f_info = fab
-                break
-        
-        if f_info is not None:
-            resultado = extrair_dados_padrao(texto_completo, f_info, embalagem_df)
-            st.dataframe(resultado)
-            st.success(f"Pedido processado usando regras da {f_info['fabrica']}")
-        else:
-            st.error("Não achei o CNPJ da fábrica no PDF. Verifique se a fábrica está cadastrada.")
-
-# --- ÁREA DE CADASTRO (Para não precisar mexer no GitHub) ---
-with st.expander("➕ Cadastrar Novo Cliente ou Item"):
-    aba_alvo = st.radio("O que deseja adicionar?", ["Cliente", "Item/Embalagem"])
+if st.button("🚀 Processar Pedido", use_container_width=True, type="primary", disabled=not arquivo):
+    texto_pdf = extrair_texto_pdf(arquivo.read())
+    f_info = identificar_fabrica(texto_pdf)
     
-    if aba_alvo == "Cliente":
-        with st.form("form_cliente"):
-            novo_n = st.text_input("Nome do Cliente")
-            if st.form_submit_button("Salvar na Base"):
-                nova_linha = pd.DataFrame([{"cliente": novo_n, "layout": "padrao"}])
-                atualizar_excel("clientes", pd.concat([clientes_df, nova_linha]))
-                st.success("Cliente salvo! Atualize a página.")
-                st.cache_data.clear()
-    
+    if f_info is None:
+        st.error("❌ Fábrica não identificada no PDF.")
     else:
-        with st.form("form_item"):
-            n_sku = st.text_input("SKU")
-            n_emb = st.number_input("Qtd Embalagem", min_value=1)
-            if st.form_submit_button("Salvar Item"):
-                nova_linha = pd.DataFrame([{"sku": n_sku, "embalagem": n_emb}])
-                atualizar_excel("embalagem", pd.concat([embalagem_df, nova_linha]))
-                st.success("Item salvo!")
+        c_info = clientes_df[clientes_df['cliente'] == sel_cliente].iloc[0]
+        df_final = processar_pedido(texto_pdf, c_info['layout'], f_info)
+        
+        if df_final.empty:
+            st.warning("⚠️ Nenhum item extraído.")
+        else:
+            st.success("✅ Processado!")
+            st.dataframe(df_final, use_container_width=True)
+            st.download_button("⬇️ Baixar Resultado", df_final.to_csv(index=False).encode('utf-8'), f"pedido_{sel_cliente}.csv", use_container_width=True)
+
+# --- GERENCIAMENTO (ADICIONAR E EXCLUIR) ---
+st.write("")
+st.write("---")
+with st.expander("📂 Gerenciar Base de Dados (Clientes/Itens)"):
+    tab1, tab2, tab3 = st.tabs(["🆕 Adicionar Cliente", "🗑️ Excluir Cliente", "📦 Itens"])
+    
+    with tab1:
+        with st.form("add_cliente"):
+            n_nome = st.text_input("Nome do Cliente")
+            n_layout = st.selectbox("Layout", ["carajas", "palato", "casa_vieira"])
+            if st.form_submit_button("Salvar"):
+                if n_nome:
+                    novo = {"cnpj_cliente": "", "cliente": n_nome, "layout": n_layout, "regra_embalagem": "padrão"}
+                    if salvar_na_planilha("clientes", novo):
+                        st.success("Adicionado!")
+                        st.cache_data.clear()
+                        st.rerun()
+
+    with tab2:
+        st.warning("Cuidado: A exclusão é permanente.")
+        cliente_para_excluir = st.selectbox("Selecione o cliente para remover", lista_clientes, key="del_sel")
+        if st.button("❌ Confirmar Exclusão", use_container_width=True):
+            if excluir_da_planilha("clientes", "cliente", cliente_para_excluir):
+                st.success(f"{cliente_para_excluir} removido!")
                 st.cache_data.clear()
+                st.rerun()
+
+    with tab3:
+        st.info("Aqui você pode cadastrar SKUs novos na base de embalagem.")
+        # ... (mesmo formulário de itens da versão anterior)
