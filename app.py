@@ -63,12 +63,14 @@ if not df_clientes.empty:
         lista_final_dfs = []
         dicionario_csvs = {} 
         
+        # Colunas que queremos manter conforme a tratativa anterior
+        colunas_alvo = ['sku', 'quantidade', 'origem', 'desconto']
+        
         try:
             placeholder = st.empty()
-            placeholder.info("⏳ Processando... Aguarde.")
+            placeholder.info("⏳ Filtrando dados dos pedidos...")
             
             for arquivo in arquivos:
-                # Resetando o ponteiro do arquivo para evitar leitura vazia
                 arquivo.seek(0)
                 pdf_bytes = arquivo.read()
                 dados_deste_pdf = []
@@ -77,13 +79,23 @@ if not df_clientes.empty:
                     for page in pdf.pages:
                         tabela = page.extract_table()
                         if tabela and len(tabela) > 1:
-                            # Cria o DF e remove colunas sem nome ou repetidas
                             df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
-                            df_temp = df_temp.loc[:, df_temp.columns.notna()].copy()
-                            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()].copy()
                             
-                            df_temp['arquivo_origem'] = arquivo.name
-                            dados_deste_pdf.append(df_temp)
+                            # TRATATIVA: Deixa as colunas em minúsculo e limpa espaços para bater com o filtro
+                            df_temp.columns = [str(c).strip().lower() for c in df_temp.columns]
+                            
+                            # Filtra apenas as colunas que existem no PDF e que estão na nossa lista alvo
+                            colunas_presentes = [c for c in colunas_alvo if c in df_temp.columns]
+                            
+                            if colunas_presentes:
+                                df_filtrado = df_temp[colunas_presentes].copy()
+                                
+                                # Remove linhas onde o SKU está vazio (sujeira do PDF)
+                                if 'sku' in df_filtrado.columns:
+                                    df_filtrado = df_filtrado[df_filtrado['sku'].notna() & (df_filtrado['sku'] != '')]
+                                
+                                df_filtrado['arquivo_origem'] = arquivo.name
+                                dados_deste_pdf.append(df_filtrado)
                 
                 if dados_deste_pdf:
                     df_individual = pd.concat(dados_deste_pdf, ignore_index=True)
@@ -96,11 +108,12 @@ if not df_clientes.empty:
                 df_consolidado = pd.concat(lista_final_dfs, ignore_index=True)
                 
                 st.success(f"✅ {len(arquivos)} pedido(s) processado(s)!")
+                
+                # Exibe a prévia limpa
                 st.dataframe(df_consolidado, use_container_width=True)
                 
                 st.write("---")
                 
-                # Colunas lado a lado para os botões
                 c1, c2 = st.columns(2)
                 with c1:
                     st.download_button("📥 Baixar Tudo (Único CSV)", 
@@ -114,9 +127,9 @@ if not df_clientes.empty:
                     st.download_button("📦 Baixar Separados (ZIP)", 
                                        buf.getvalue(), "PEDIDOS.zip", "application/zip", use_container_width=True)
             else:
-                st.warning("Nenhum dado encontrado nos arquivos enviados.")
+                st.warning("Não encontrei as colunas de SKU/Quantidade nos PDFs.")
 
         except Exception as e:
-            st.error(f"Erro Crítico: {e}")
+            st.error(f"Erro na filtragem: {e}")
 else:
     st.warning("Verifique o arquivo 'regras_fabricas.xlsx'.")
