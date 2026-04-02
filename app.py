@@ -12,49 +12,62 @@ BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 
-# Definindo os caminhos das logos que você já tem na pasta
-LOGO_BRANCA = str(INFOS_DIR / "logo_light.png") # Para fundo escuro
-LOGO_PRETA = str(INFOS_DIR / "logo_dark.png")   # Para fundo branco (Modo Claro)
+# Caminhos das logos como strings (evita o erro do st.logo)
+LOGO_BRANCA = str(INFOS_DIR / "logo_light.png")
+LOGO_PRETA = str(INFOS_DIR / "logo_dark.png")
 
-st.set_page_config(page_title="Processador de Pedidos Tramontina", page_icon="📄", layout="centered")
+st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
 
-# --- AQUI ESTÁ O JEITO NATIVO DO STREAMLIT ---
-# Ele mostra a 'icon_image' no modo claro e a 'dark_theme' no modo escuro
-st.logo(
-    image=LOGO_PRETA,      # Esta fica escura quando o fundo for branco
-    dark_theme=LOGO_BRANCA, # Esta fica clara quando o fundo for escuro
-    size="large"
-)
+# --- O JEITO CERTO DO STREAMLIT ---
+# Usamos try/except para o caso da versão do Streamlit ser antiga
+try:
+    st.logo(
+        image=LOGO_PRETA,      # Aparece no modo claro (fundo branco)
+        dark_theme=LOGO_BRANCA, # Aparece no modo escuro
+        size="large"
+    )
+except Exception:
+    pass
 
 @st.cache_data
 def carregar_aba(aba):
     return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
 
-# ... (restante das suas funções de extração permanecem iguais) ...
+def extrair_texto_pdf(pdf_bytes):
+    texto = ""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for p in pdf.pages:
+                texto += (p.extract_text() or "") + "\n"
+    except Exception:
+        pass
+    return texto
 
 def extrair_numero_pedido(texto, nome_arquivo):
-    # Prioridade ao nome do arquivo para garantir o número correto
-    nome_sem_extensao = Path(nome_arquivo).stem
-    numeros_no_nome = re.findall(r"\d+", nome_sem_extensao)
-    if numeros_no_nome:
-        return max(numeros_no_nome, key=len)
+    """
+    Prioridade total ao nome do arquivo (ex: L75969.pdf) para evitar o erro do '000634'.
+    """
+    # 1. Tenta pegar os números do nome do arquivo primeiro
+    nome_limpo = Path(nome_arquivo).stem
+    numeros_nome = re.findall(r"\d+", nome_limpo)
+    if numeros_nome:
+        return max(numeros_nome, key=len)
     
-    padrao_rigido = r"(?:OC|PEDIDO|ORDEM|COMPRA)\s*[:.\-]?\s*(\d{4,})"
-    resultado = re.search(padrao_rigido, texto, re.IGNORECASE)
-    return resultado.group(1) if resultado else "SEM_NUMERO"
+    # 2. Se não tiver no nome, busca no texto
+    resultado = re.search(r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})", texto, re.IGNORECASE)
+    return resultado.group(1) if resultado else "0000"
+
+# ... (Funções identificar_fabrica e processar_pedido continuam as mesmas) ...
 
 # --- INTERFACE CENTRAL ---
-# Se você ainda quiser a logo no centro da página (além da barra lateral)
-# e quer que ela mude, o Streamlit não faz isso 100% automático no st.image,
-# por isso a recomendação é usar apenas o st.logo acima. 
-
-# Mas se fizer questão da logo central, o código abaixo ajuda:
-col_esq, col_logo, col_dir = st.columns([1, 2, 1])
-with col_logo:
-    # Mostramos a logo preta aqui, que é a que você quer que apareça bem no modo claro
-    st.image(LOGO_PRETA, width=200)
+# Para a logo central não sumir, vamos usar a versão PRETA que você quer que destaque
+if Path(LOGO_PRETA).exists():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Mostra a logo escura no centro para garantir visibilidade no modo branco
+        st.image(LOGO_PRETA, width=200)
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# ... (resto do código do uploader e botões) ...
+# O restante do seu código de upload e processamento vem aqui...
