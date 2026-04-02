@@ -102,20 +102,17 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         num_pedido = extrair_numero_pedido(texto_pdf)
         ultimo_num_pedido = num_pedido # Guarda para o nome do arquivo individual
 
-        if f_info is not None:
-            df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
-            if not df_individual.empty:
-                # Nome para o arquivo dentro do ZIP: CARAJAS_12345
-                nome_formatado = f"{sel_display.replace(' ', '_').upper()}_{num_pedido}"
-                
-                df_consolidado = df_individual.copy()
-                df_consolidado["pedido"] = num_pedido
-                df_consolidado["arquivo_origem"] = arquivo.name
-                lista_dfs.append(df_consolidado)
-                
-                csv_buffer = io.StringIO()
-                df_individual.to_csv(csv_buffer, index=False)
-                arquivos_csv_zip[f"{nome_formatado}.csv"] = csv_buffer.getvalue()
+       # ... dentro do loop for arquivo in arquivos:
+    num_pedido = extrair_numero_pedido(texto_pdf)
+    
+    if f_info is not None:
+        df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
+        if not df_individual.empty:
+            # FORMATO: CLIENTE NUMERO_OC (Ex: CARAJAS 75969)
+            nome_final_individual = f"{sel_display.upper()} {num_pedido}"
+            
+            # Guarda para o ZIP
+            arquivos_csv_zip[f"{nome_final_individual}.csv"] = csv_buffer.getvalue()
         else:
             st.error(f"❌ Fábrica não identificada: {arquivo.name}")
 
