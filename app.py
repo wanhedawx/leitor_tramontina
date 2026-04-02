@@ -61,7 +61,7 @@ def processar_pedido(texto, layout, f_info):
 if LOGO_PATH.exists():
     # Criamos 3 colunas: a do meio (2) é onde a logo fica. 
     # As laterais (1) servem apenas para empurrar a logo para o centro.
-    col_esq, col_logo, col_dir = st.columns([2, 2, 2])
+    col_esq, col_logo, col_dir = st.columns([3, 2, 2])
     
     with col_logo:
         # O parâmetro use_container_width=True ajuda a centralizar dentro da coluna
