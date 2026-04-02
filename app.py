@@ -6,6 +6,7 @@ import pandas as pd
 import pdfplumber
 import streamlit as st
 
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -13,6 +14,7 @@ INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 LOGO_PATH = INFOS_DIR / "logo_light.png"
 
+# --- 2. FUNÇÕES DE SUPORTE ---
 def get_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -21,14 +23,14 @@ def get_image_base64(path):
 def carregar_aba(aba):
     try:
         return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
-    except Exception as e:
-        st.error(f"Erro ao carregar '{aba}': {e}")
+    except:
         return pd.DataFrame()
 
 def extrair_numero_pedido(nome_arquivo):
     numeros = re.findall(r"\d+", Path(nome_arquivo).stem)
     return max(numeros, key=len) if numeros else "SEM_NUMERO"
 
+# --- 3. CSS: LOGO DINÂMICA ---
 st.markdown(
     """
     <style>
@@ -39,58 +41,76 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-# --- 4. INTERFACE: LOGO ---
+
+# --- 4. INTERFACE ---
 if LOGO_PATH.exists():
     img_b64 = get_image_base64(str(LOGO_PATH))
     st.markdown(f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">', unsafe_allow_html=True)
+
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. ENTRADA DE DADOS E OPÇÕES ---
+# --- 5. LÓGICA DE EXTRAÇÃO REAL ---
 try:
     df_clientes = carregar_aba("clientes")
-    
     if not df_clientes.empty:
-        # Monta o dicionário de opções baseado na coluna 'cliente' do seu Excel
         opcoes = {c.replace("_", " ").title(): c for c in df_clientes['cliente'].unique()}
-        
-        # O selectbox agora exibe as opções vindas do seu arquivo
         sel_display = st.selectbox("1. Selecione o Cliente", options=list(opcoes.keys()), index=None)
         arquivos = st.file_uploader("2. Envie os PDFs", type=["pdf"], accept_multiple_files=True)
 
         if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
             cliente_id = opcoes[sel_display]
-            todos_pedidos = []
+            todos_itens_consolidados = []
             
             for arquivo in arquivos:
                 num_pedido = extrair_numero_pedido(arquivo.name)
+                dados_do_pdf = []
                 
-                # --- LÓGICA DE EXTRAÇÃO ---
-                df_pedido = pd.DataFrame({"Pedido": [num_pedido], "Cliente": [sel_display], "Status": ["OK"]})
-                todos_pedidos.append(df_pedido)
+                # --- AQUI ESTÁ A LÓGICA DE LEITURA QUE FALTAVA ---
+                with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
+                    for page in pdf.pages:
+                        tabela = page.extract_table()
+                        if tabela:
+                            # Converte a tabela do PDF em DataFrame
+                            df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
+                            # Adiciona colunas de controle
+                            df_temp['Pedido'] = num_pedido
+                            df_temp['Cliente'] = sel_display
+                            dados_do_pdf.append(df_temp)
                 
-                with st.expander(f"📄 Prévia: Pedido {num_pedido}", expanded=True):
-                    st.dataframe(df_pedido, use_container_width=True)
-                    st.download_button(
-                        label=f"⬇️ Baixar Pedido {num_pedido}",
-                        data=df_pedido.to_csv(index=False).encode('utf-8'),
-                        file_name=f"PEDIDO_{num_pedido}.csv",
-                        mime="text/csv",
-                        key=f"btn_{num_pedido}"
-                    )
+                if dados_do_pdf:
+                    df_final_pedido = pd.concat(dados_do_pdf, ignore_index=True)
+                    # Limpeza básica (remove linhas vazias de SKU)
+                    df_final_pedido = df_final_pedido.dropna(how='all') 
+                    
+                    todos_itens_consolidados.append(df_final_pedido)
+                    
+                    # Prévia Individual
+                    with st.expander(f"📄 Itens Extraídos: Pedido {num_pedido}", expanded=True):
+                        st.dataframe(df_final_pedido, use_container_width=True)
+                        st.download_button(
+                            label=f"⬇️ Baixar CSV Pedido {num_pedido}",
+                            data=df_final_pedido.to_csv(index=False).encode('utf-8'),
+                            file_name=f"PEDIDO_{num_pedido}.csv",
+                            mime="text/csv",
+                            key=f"btn_{num_pedido}"
+                        )
 
-            if todos_pedidos:
+            # --- DOWNLOAD CONSOLIDADO ---
+            if todos_itens_consolidados:
                 st.write("---")
-                df_consolidado = pd.concat(todos_pedidos, ignore_index=True)
+                df_total = pd.concat(todos_itens_consolidados, ignore_index=True)
+                st.subheader("📦 Arquivo Consolidado (Todos os Itens)")
+                st.dataframe(df_total, use_container_width=True)
                 st.download_button(
-                    label="💾 BAIXAR TODOS OS PEDIDOS CONSOLIDADOS",
-                    data=df_consolidado.to_csv(index=False).encode('utf-8'),
+                    label="💾 BAIXAR TUDO EM UM ÚNICO CSV",
+                    data=df_total.to_csv(index=False).encode('utf-8'),
                     file_name=f"CONSOLIDADO_{cliente_id.upper()}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
     else:
-        st.warning("Nenhum cliente encontrado no arquivo regras_fabricas.xlsx.")
+        st.error("Erro: Aba 'clientes' não encontrada no Excel.")
 
 except Exception as e:
-    st.error(f"Erro ao processar as opções: {e}")
+    st.error(f"Erro no processamento: {e}")
