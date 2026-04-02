@@ -21,25 +21,43 @@ def carregar_aba(aba):
 
 def extrair_texto_pdf(pdf_bytes):
     texto = ""
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for p in pdf.pages:
-            texto += (p.extract_text() or "") + "\n"
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for p in pdf.pages:
+                texto += (p.extract_text() or "") + "\n"
+    except:
+        pass
     return texto
 
-def extrair_numero_pedido(texto):
-    padroes_oc = [
-        r"OC\s*[:.\-]?\s*(\d+)",
-        r"ORDEM\s*DE?\s*COMPRA\s*[:.\-]?\s*(\d+)",
-        r"PEDIDO\s*DO?\s*CLIENTE\s*[:.\-]?\s*(\d+)",
-        r"PEDIDO\s*[:.\-]?\s*(\d+)"
-    ]
-    for padrao in padroes_oc:
-        resultado = re.search(padrao, texto, re.IGNORECASE)
-        if resultado:
-            return resultado.group(1)
+def extrair_numero_pedido(texto, nome_arquivo):
+    """
+    Tenta extrair o número do pedido/OC do texto do PDF.
+    Se falhar, tenta pegar do nome do próprio arquivo PDF.
+    """
+    # 1. Limpa ruídos comuns de leitura de PDF
+    texto_limpo = texto.replace('\xa0', ' ')
     
-    numeros_topo = re.findall(r"\b\d{5,8}\b", texto[:600])
-    return numeros_topo[0] if numeros_topo else "0000"
+    # 2. Padrões específicos (OC, Pedido, Compra)
+    padroes_oc = [
+        r"(?:OC|ORDEM|PEDIDO|COMPRA)\s*[:.\-]?\s*([a-zA-Z0-9]+)",
+        r"N[º°º].?\s*([a-zA-Z0-9]+)"
+    ]
+    
+    for padrao in padroes_oc:
+        resultado = re.search(padrao, texto_limpo, re.IGNORECASE)
+        if resultado:
+            valor = resultado.group(1).strip()
+            # Filtra se o resultado for muito curto ou apenas letras
+            if len(valor) >= 3:
+                return valor
+
+    # 3. Se não achou no texto, tenta extrair apenas números do NOME DO ARQUIVO
+    # (Ex: L75969.pdf -> 75969)
+    numeros_nome = re.findall(r"\d+", nome_arquivo)
+    if numeros_nome:
+        return numeros_nome[0]
+        
+    return "0000"
 
 def identificar_fabrica(texto):
     df_f = carregar_aba("fabricas")
@@ -91,13 +109,15 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         conteudo = arquivo.read()
         texto_pdf = extrair_texto_pdf(conteudo)
         f_info = identificar_fabrica(texto_pdf)
-        num_pedido = extrair_numero_pedido(texto_pdf)
+        
+        # PASSO CRÍTICO: Tenta pegar o número do texto OU do nome do arquivo
+        num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
         ultimo_num_pedido = num_pedido 
 
         if f_info is not None:
             df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
             if not df_individual.empty:
-                # CORREÇÃO DA INDENTAÇÃO AQUI:
+                # NOME DO ARQUIVO: CARAJAS 75969
                 nome_formatado = f"{sel_display.upper()} {num_pedido}"
                 
                 df_temp = df_individual.copy()
@@ -117,25 +137,30 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         st.dataframe(df_final, use_container_width=True)
         
         cliente_venda = sel_display.upper()
-        nome_consolidado = f"{cliente_venda} {ultimo_num_pedido}" if len(arquivos) == 1 else f"{cliente_venda} MULTIPLOS"
+        
+        # Define o nome para o botão de download único
+        if len(arquivos) == 1:
+            nome_arquivo_final = f"{cliente_venda} {ultimo_num_pedido}"
+        else:
+            nome_arquivo_final = f"{cliente_venda} MULTIPLOS"
 
         st.write("---")
-        c1, c2 = st.columns(2)
+        col1, col2 = st.columns(2)
         
-        with c1:
+        with col1:
             st.download_button(
-                label=f"⬇️ Baixar {nome_consolidado}",
+                label=f"⬇️ Baixar {nome_arquivo_final}",
                 data=df_final.to_csv(index=False).encode('utf-8'),
-                file_name=f"{nome_consolidado}.csv",
+                file_name=f"{nome_arquivo_final}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
         
-        with c2:
+        with col2:
             zip_io = io.BytesIO()
             with zipfile.ZipFile(zip_io, "w") as zf:
-                for nome, conteudo in arquivos_csv_zip.items():
-                    zf.writestr(nome.upper(), conteudo)
+                for nome, conteudo_csv in arquivos_csv_zip.items():
+                    zf.writestr(nome.upper(), conteudo_csv)
             
             st.download_button(
                 label="📦 Baixar Separados (ZIP)",
