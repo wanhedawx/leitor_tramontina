@@ -27,15 +27,28 @@ def extrair_texto_pdf(pdf_bytes):
     return texto
 
 def extrair_numero_pedido(texto):
-    padroes = [
-        r"(?:PEDIDO|NÚMERO|Nº)\s*[:.\-]?\s*(\d+)",
-        r"ORDEM\s*VENDAS?\s*[:.\-]?\s*(\d+)"
+    # 1. Procura padrões explícitos primeiro
+    padroes_explicitos = [
+        r"(?:PEDIDO|NÚMERO|Nº|ORDEM)\s*[:.\-]?\s*(\d+)",
+        r"OC\s*[:.\-]?\s*(\d+)",
+        r"COMPRA\s*[:.\-]?\s*(\d+)"
     ]
-    for padrao in padroes:
+    
+    for padrao in padroes_explicitos:
         resultado = re.search(padrao, texto, re.IGNORECASE)
         if resultado:
             return resultado.group(1)
-    return "SEM_NUMERO"
+    
+    # 2. Se não achou, tenta pegar o primeiro número grande (5 a 10 dígitos) 
+    # que aparece no topo do arquivo (geralmente onde fica o número do pedido)
+    numeros_soltos = re.findall(r"\b\d{5,10}\b", texto[:500]) # Busca apenas nos primeiros 500 caracteres
+    if numeros_soltos:
+        # Retorna o primeiro número que não seja um CNPJ ou Data (filtros básicos)
+        for num in numeros_soltos:
+            if len(num) < 11: # Evita CPF/CNPJ
+                return num
+                
+    return "0000" # Em vez de SEM_NUMERO, coloca zeros para não ficar feio
 
 def identificar_fabrica(texto):
     df_f = carregar_aba("fabricas")
