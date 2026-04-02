@@ -27,7 +27,6 @@ def extrair_texto_pdf(pdf_bytes):
     return texto
 
 def extrair_numero_pedido(texto):
-    # Procura especificamente por termos de Ordem de Compra ou Pedido
     padroes_oc = [
         r"OC\s*[:.\-]?\s*(\d+)",
         r"ORDEM\s*DE?\s*COMPRA\s*[:.\-]?\s*(\d+)",
@@ -39,7 +38,6 @@ def extrair_numero_pedido(texto):
         if resultado:
             return resultado.group(1)
     
-    # Busca alternativa: primeiro número de 5 a 8 dígitos no topo do PDF
     numeros_topo = re.findall(r"\b\d{5,8}\b", texto[:600])
     return numeros_topo[0] if numeros_topo else "0000"
 
@@ -56,7 +54,6 @@ def processar_pedido(texto, layout, f_info):
     itens = []
     if layout == "carajas":
         for linha in texto.splitlines():
-            # Regex ajustada para o padrão Carajas (SKU e Quantidade)
             m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
             if m: 
                 itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
@@ -76,7 +73,6 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# Carregamento da base via Excel
 clientes_df = carregar_aba("clientes")
 opcoes_clientes = {c.replace("_", " ").title(): c for c in clientes_df['cliente'].unique()}
 
@@ -95,12 +91,56 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         conteudo = arquivo.read()
         texto_pdf = extrair_texto_pdf(conteudo)
         f_info = identificar_fabrica(texto_pdf)
-        
-        # Extrai o número da OC/Pedido
         num_pedido = extrair_numero_pedido(texto_pdf)
         ultimo_num_pedido = num_pedido 
 
         if f_info is not None:
             df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
             if not df_individual.empty:
-                # NOME DO ARQUIVO: CLIENTE NUM
+                # CORREÇÃO DA INDENTAÇÃO AQUI:
+                nome_formatado = f"{sel_display.upper()} {num_pedido}"
+                
+                df_temp = df_individual.copy()
+                df_temp["pedido"] = num_pedido
+                df_temp["arquivo_origem"] = arquivo.name
+                lista_dfs.append(df_temp)
+                
+                csv_buffer = io.StringIO()
+                df_individual.to_csv(csv_buffer, index=False)
+                arquivos_csv_zip[f"{nome_formatado}.csv"] = csv_buffer.getvalue()
+        else:
+            st.error(f"❌ Fábrica não identificada: {arquivo.name}")
+
+    if lista_dfs:
+        df_final = pd.concat(lista_dfs, ignore_index=True)
+        st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s)!")
+        st.dataframe(df_final, use_container_width=True)
+        
+        cliente_venda = sel_display.upper()
+        nome_consolidado = f"{cliente_venda} {ultimo_num_pedido}" if len(arquivos) == 1 else f"{cliente_venda} MULTIPLOS"
+
+        st.write("---")
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.download_button(
+                label=f"⬇️ Baixar {nome_consolidado}",
+                data=df_final.to_csv(index=False).encode('utf-8'),
+                file_name=f"{nome_consolidado}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with c2:
+            zip_io = io.BytesIO()
+            with zipfile.ZipFile(zip_io, "w") as zf:
+                for nome, conteudo in arquivos_csv_zip.items():
+                    zf.writestr(nome.upper(), conteudo)
+            
+            st.download_button(
+                label="📦 Baixar Separados (ZIP)",
+                data=zip_io.getvalue(),
+                file_name=f"PEDIDOS_{cliente_venda}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
