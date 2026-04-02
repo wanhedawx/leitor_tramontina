@@ -13,57 +13,53 @@ BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 
-# Caminhos das duas logos
-LOGO_PARA_FUNDO_BRANCO = INFOS_DIR / "logo_dark.png"  # Escrita escura
-LOGO_PARA_FUNDO_ESCURO = INFOS_DIR / "logo_light.png" # Escrita branca
+# Caminhos das logos
+LOGO_DARK = INFOS_DIR / "logo_dark.png"   # Para fundo claro (escrita escura)
+LOGO_LIGHT = INFOS_DIR / "logo_light.png" # Para fundo escuro (escrita branca)
 
-# --- 2. EXIBIÇÃO DA LOGO DINÂMICA ---
-# O Streamlit troca automaticamente baseado no tema do usuário
-if LOGO_PARA_FUNDO_BRANCO.exists() and LOGO_PARA_FUNDO_ESCURO.exists():
-    st.logo(
-        image=str(LOGO_PARA_FUNDO_BRANCO),       # Mostra esta no modo claro
-        dark_theme=str(LOGO_PARA_FUNDO_ESCURO), # Mostra esta no modo escuro
-        size="large"
-    )
-else:
-    # Caso os arquivos tenham nomes diferentes, exibe aviso
-    st.warning("Verifique se logo_dark.png e logo_light.png estão na pasta infos.")
+# --- 2. CSS PARA TROCA AUTOMÁTICA DE LOGO ---
+st.markdown(
+    """
+    <style>
+    /* Esconde a logo errada dependendo do tema do navegador */
+    @media (prefers-color-scheme: dark) {
+        .logo-light { display: block !important; margin: 0 auto; }
+        .logo-dark { display: none !important; }
+    }
+    @media (prefers-color-scheme: light) {
+        .logo-light { display: none !important; }
+        .logo-dark { display: block !important; margin: 0 auto; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- 3. EXIBIÇÃO DA LOGO ---
+col_esq, col_logo, col_dir = st.columns([1, 2, 1])
+with col_logo:
+    if LOGO_LIGHT.exists():
+        # A classe 'logo-light' será controlada pelo CSS acima
+        st.image(str(LOGO_LIGHT), width=200, output_format="PNG")
+    if LOGO_DARK.exists():
+        # A classe 'logo-dark' será controlada pelo CSS acima
+        st.image(str(LOGO_DARK), width=200, output_format="PNG")
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 3. FUNÇÃO DE EXTRAÇÃO (CORREÇÃO DO NÚMERO L75969) ---
+# --- 4. FUNÇÃO DE EXTRAÇÃO (CORREÇÃO DO NÚMERO L75969) ---
 def extrair_numero_pedido(texto, nome_arquivo):
-    """Prioriza o número no nome do arquivo para ignorar o '000634' interno."""
+    """Prioriza o número no nome do arquivo para evitar o erro '000634'."""
     nome_sem_ext = Path(nome_arquivo).stem
     numeros_no_nome = re.findall(r"\d+", nome_sem_ext)
     
-    # Se achar número no nome (ex: 75969), usa ele
     if numeros_validos := [n for n in numeros_no_nome if len(n) >= 4]:
         return max(numeros_validos, key=len)
     
-    # Só busca no texto se o nome do arquivo estiver limpo
     padrao = r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})"
     resultado = re.search(padrao, texto, re.IGNORECASE)
     return resultado.group(1) if resultado else "SEM_NUMERO"
-
-# --- CONTINUE COM O RESTANTE DO SEU CÓDIGO (PROCESSAMENTO) ---
-
-# --- 4. INTERFACE: LOGO ---
-if LOGO_PATH.exists():
-    try:
-        img_b64 = get_image_base64(str(LOGO_PATH))
-        col_esq, col_logo, col_dir = st.columns([1, 2, 1])
-        with col_logo:
-            st.markdown(
-                f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">',
-                unsafe_allow_html=True
-            )
-    except Exception as e:
-        st.error(f"Erro ao carregar logo: {e}")
-
-st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
-st.write("---")
 
 # --- 5. LÓGICA DE PROCESSAMENTO ---
 try:
