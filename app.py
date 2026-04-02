@@ -11,63 +11,119 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
-
-# Caminhos das logos como strings (evita o erro do st.logo)
-LOGO_BRANCA = str(INFOS_DIR / "logo_light.png")
-LOGO_PRETA = str(INFOS_DIR / "logo_dark.png")
+LOGO_BRANCA = INFOS_DIR / "logo_light.png"
+LOGO_PRETA = INFOS_DIR / "logo_dark.png"
 
 st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
 
-# --- O JEITO CERTO DO STREAMLIT ---
-# Usamos try/except para o caso da versão do Streamlit ser antiga
-try:
-    st.logo(
-        image=LOGO_PRETA,      # Aparece no modo claro (fundo branco)
-        dark_theme=LOGO_BRANCA, # Aparece no modo escuro
-        size="large"
-    )
-except Exception:
-    pass
-
-@st.cache_data
-def carregar_aba(aba):
-    return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
-
-def extrair_texto_pdf(pdf_bytes):
-    texto = ""
-    try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for p in pdf.pages:
-                texto += (p.extract_text() or "") + "\n"
-    except Exception:
-        pass
-    return texto
-
-def extrair_numero_pedido(texto, nome_arquivo):
+# --- CSS PARA A LOGO NÃO SUMIR (MODO BRANCO E ESCURO) ---
+st.markdown(
     """
-    Prioridade total ao nome do arquivo (ex: L75969.pdf) para evitar o erro do '000634'.
-    """
-    # 1. Tenta pegar os números do nome do arquivo primeiro
-    nome_limpo = Path(nome_arquivo).stem
-    numeros_nome = re.findall(r"\d+", nome_limpo)
-    if numeros_nome:
-        return max(numeros_nome, key=len)
-    
-    # 2. Se não tiver no nome, busca no texto
-    resultado = re.search(r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})", texto, re.IGNORECASE)
-    return resultado.group(1) if resultado else "0000"
+    <style>
+    .logo-container {
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+    }
+    /* No modo claro, a logo preta fica normal. No modo escuro, o filtro inverte para branco */
+    @media (prefers-color-scheme: dark) {
+        .logo-img { filter: invert(1) brightness(2); }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-# ... (Funções identificar_fabrica e processar_pedido continuam as mesmas) ...
-
-# --- INTERFACE CENTRAL ---
-# Para a logo central não sumir, vamos usar a versão PRETA que você quer que destaque
-if Path(LOGO_PRETA).exists():
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # Mostra a logo escura no centro para garantir visibilidade no modo branco
-        st.image(LOGO_PRETA, width=200)
+# Exibe a logo (usando a logo_dark como base, o CSS inverte se precisar)
+if LOGO_PRETA.exists():
+    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
+    st.image(str(LOGO_PRETA), width=200, output_format="PNG")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# O restante do seu código de upload e processamento vem aqui...
+@st.cache_data
+def carregar_aba(aba):
+    try:
+        return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
+    except Exception as e:
+        st.error(f"Erro ao carregar aba {aba}: {e}")
+        return pd.DataFrame()
+
+def extrair_numero_pedido(texto, nome_arquivo):
+    # 1. Prioridade absoluta: Números no nome do arquivo (Ex: L75969.pdf -> 75969)
+    numeros_nome = re.findall(r"\d+", Path(nome_arquivo).stem)
+    if numeros_nome:
+        return max(numeros_nome, key=len)
+    
+    # 2. Busca no texto por OC ou Pedido
+    resultado = re.search(r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})", texto, re.IGNORECASE)
+    if resultado:
+        return resultado.group(1)
+    
+    return "SEM_NUMERO"
+
+# --- LÓGICA DE IDENTIFICAÇÃO E PROCESSAMENTO ---
+def identificar_fabrica(texto):
+    df_f = carregar_aba("fabricas")
+    if df_f.empty: return None
+    texto_limpo = re.sub(r"\D", "", texto)
+    for _, row in df_f.iterrows():
+        cnpj_limpo = re.sub(r"\D", "", str(row['cnpj'])).zfill(14)
+        if cnpj_limpo in texto_limpo:
+            return row
+    return None
+
+def processar_pedido(texto, layout, f_info):
+    itens = []
+    if layout == "carajas":
+        for linha in texto.splitlines():
+            # Regex ajustada para capturar SKU e QTD
+            m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
+            if m: 
+                itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
+    df = pd.DataFrame(itens)
+    if not df.empty:
+        df["origem"] = f_info["operacao"]
+        df["desconto"] = f_info["desconto"]
+    return df
+
+# --- INTERFACE DE UPLOAD ---
+clientes_df = carregar_aba("clientes")
+if not clientes_df.empty:
+    opcoes_clientes = {c.replace("_", " ").title(): c for c in clientes_df['cliente'].unique()}
+    sel_display = st.selectbox("1. Selecione o Cliente", options=list(opcoes_clientes.keys()), index=None)
+    arquivos = st.file_uploader("2. Envie os PDFs", type=["pdf"], accept_multiple_files=True)
+
+    if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
+        cliente_original = opcoes_clientes[sel_display]
+        c_info = clientes_df[clientes_df['cliente'] == cliente_original].iloc[0]
+        
+        lista_dfs = []
+        arquivos_csv_zip = {}
+        
+        for arquivo in arquivos:
+            with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
+                texto_pdf = "\n".join([p.extract_text() or "" for p in pdf.pages])
+            
+            f_info = identificar_fabrica(texto_pdf)
+            num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
+            
+            if f_info is not None:
+                df_ped = processar_pedido(texto_pdf, c_info['layout'], f_info)
+                if not df_ped.empty:
+                    df_ped["pedido"] = num_pedido
+                    lista_dfs.append(df_ped)
+                    
+                    csv = df_ped.to_csv(index=False).encode('utf-8')
+                    arquivos_csv_zip[f"{sel_display.upper()} {num_pedido}.csv"] = csv
+            else:
+                st.error(f"Fábrica não identificada em {arquivo.name}")
+
+        if lista_dfs:
+            df_final = pd.concat(lista_dfs, ignore_index=True)
+            st.dataframe(df_final, use_container_width=True)
+            
+            # Botão de Download do Consolidado
+            st.download_button("⬇️ Baixar Planilha Consolidada", df_final.to_csv(index=False).encode('utf-8'), "pedidos_processados.csv", "text/csv", use_container_width=True)
