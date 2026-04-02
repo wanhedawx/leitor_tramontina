@@ -40,11 +40,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 # --- 4. INTERFACE: LOGO ---
-
-
+if LOGO_PATH.exists():
+    img_b64 = get_image_base64(str(LOGO_PATH))
+    st.markdown(f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">', unsafe_allow_html=True)
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
-
 
 # --- 5. ENTRADA DE DADOS E OPÇÕES ---
 try:
