@@ -11,37 +11,30 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
-LOGO_BRANCA = INFOS_DIR / "logo_light.png"
-LOGO_PRETA = INFOS_DIR / "logo_dark.png"
+# Sua logo única (geralmente com letras pretas e fundo transparente)
+LOGO_PATH = INFOS_DIR / "logo.png"
 
 st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
 
 # --- CSS PARA A LOGO NÃO SUMIR (MODO BRANCO E ESCURO) ---
+# Em vez de inverter as cores, vamos colocar um fundo branco suave atrás da imagem.
 st.markdown(
     """
     <style>
-    .logo-container {
+    .logo-card {
+        background-color: rgba(255, 255, 255, 0.9); /* Fundo branco levemente transparente */
+        padding: 15px;
+        border-radius: 15px; /* Bordas arredondadas */
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.1); /* Sombra suave para dar destaque */
         display: flex;
         justify-content: center;
-        padding: 20px;
-    }
-    /* No modo claro, a logo preta fica normal. No modo escuro, o filtro inverte para branco */
-    @media (prefers-color-scheme: dark) {
-        .logo-img { filter: invert(1) brightness(2); }
+        width: 250px; /* Define um tamanho fixo para o card */
+        margin: 0 auto; /* Centraliza o card na coluna */
     }
     </style>
     """,
     unsafe_allow_html=True
 )
-
-# Exibe a logo (usando a logo_dark como base, o CSS inverte se precisar)
-if LOGO_PRETA.exists():
-    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-    st.image(str(LOGO_PRETA), width=200, output_format="PNG")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
-st.write("---")
 
 @st.cache_data
 def carregar_aba(aba):
@@ -64,7 +57,7 @@ def extrair_numero_pedido(texto, nome_arquivo):
     
     return "SEM_NUMERO"
 
-# --- LÓGICA DE IDENTIFICAÇÃO E PROCESSAMENTO ---
+# --- LÓGICA DE IDENTIFICAÇÃO E PROCESSAMENTO (Permanece igual) ---
 def identificar_fabrica(texto):
     df_f = carregar_aba("fabricas")
     if df_f.empty: return None
@@ -79,7 +72,6 @@ def processar_pedido(texto, layout, f_info):
     itens = []
     if layout == "carajas":
         for linha in texto.splitlines():
-            # Regex ajustada para capturar SKU e QTD
             m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
             if m: 
                 itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
@@ -89,7 +81,20 @@ def processar_pedido(texto, layout, f_info):
         df["desconto"] = f_info["desconto"]
     return df
 
-# --- INTERFACE DE UPLOAD ---
+# --- INTERFACE CENTRAL ---
+# Exibe a logo com o novo estilo de "card"
+if LOGO_PATH.exists():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Envolvemos a imagem no container HTML com o estilo 'logo-card'
+        st.markdown('<div class="logo-card">', unsafe_allow_html=True)
+        st.image(str(LOGO_PATH), width=200)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
+st.write("---")
+
+# --- LÓGICA DO PROCESSAMENTO ---
 clientes_df = carregar_aba("clientes")
 if not clientes_df.empty:
     opcoes_clientes = {c.replace("_", " ").title(): c for c in clientes_df['cliente'].unique()}
@@ -104,26 +109,38 @@ if not clientes_df.empty:
         arquivos_csv_zip = {}
         
         for arquivo in arquivos:
-            with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
-                texto_pdf = "\n".join([p.extract_text() or "" for p in pdf.pages])
-            
-            f_info = identificar_fabrica(texto_pdf)
-            num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
-            
-            if f_info is not None:
-                df_ped = processar_pedido(texto_pdf, c_info['layout'], f_info)
-                if not df_ped.empty:
-                    df_ped["pedido"] = num_pedido
-                    lista_dfs.append(df_ped)
-                    
-                    csv = df_ped.to_csv(index=False).encode('utf-8')
-                    arquivos_csv_zip[f"{sel_display.upper()} {num_pedido}.csv"] = csv
-            else:
-                st.error(f"Fábrica não identificada em {arquivo.name}")
+            try:
+                with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
+                    texto_pdf = "\n".join([p.extract_text() or "" for p in pdf.pages])
+                
+                f_info = identificar_fabrica(texto_pdf)
+                # Tenta pegar o número do nome do arquivo (Ex: L75969) para garantir
+                num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
+                
+                if f_info is not None:
+                    df_ped = processar_pedido(texto_pdf, c_info['layout'], f_info)
+                    if not df_ped.empty:
+                        df_ped["pedido"] = num_pedido
+                        lista_dfs.append(df_ped)
+                        
+                        csv = df_ped.to_csv(index=False).encode('utf-8')
+                        arquivos_csv_zip[f"{sel_display.upper()} {num_pedido}.csv"] = csv
+                else:
+                    st.error(f"❌ Fábrica não identificada: {arquivo.name}")
+            except Exception as e:
+                st.error(f"Erro ao ler PDF {arquivo.name}: {e}")
 
         if lista_dfs:
             df_final = pd.concat(lista_dfs, ignore_index=True)
+            st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s)!")
             st.dataframe(df_final, use_container_width=True)
             
-            # Botão de Download do Consolidado
-            st.download_button("⬇️ Baixar Planilha Consolidada", df_final.to_csv(index=False).encode('utf-8'), "pedidos_processados.csv", "text/csv", use_container_width=True)
+            cliente_label = sel_display.upper()
+            st.write("---")
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                st.download_button(
+                    label="⬇️ Baixar Planilha Consolidada",
+                    data=df_final.to_csv(index=False).encode('utf-8'),
+                    file_name=f"PEDIDOS_{cliente_
