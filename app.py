@@ -30,32 +30,26 @@ def extrair_texto_pdf(pdf_bytes):
     return texto
 
 def extrair_numero_pedido(texto, nome_arquivo):
-    """
-    Tenta capturar o número da OC ou Pedido. 
-    Se não encontrar no texto, tenta extrair os números do nome do arquivo (ex: L75969.pdf).
-    """
-    # 1. Tenta padrões comuns no texto do PDF
-    padroes = [
-        r"(?:OC|ORDEM|PEDIDO|COMPRA|N[º°º])\s*[:.\-]?\s*(\d+)",
-        r"CLIENTE\s*[:.\-]?\s*(\d+)"
-    ]
+    # 1. Tenta achar o número da OC/Pedido no texto (Busca mais rígida)
+    # Procura especificamente por OC: XXXXX ou Pedido: XXXXX
+    padrao_rigido = r"(?:OC|PEDIDO|ORDEM|COMPRA)\s*[:.\-]?\s*(\d{5,})"
+    resultado = re.search(padrao_rigido, texto, re.IGNORECASE)
     
-    for padrao in padroes:
-        resultado = re.search(padrao, texto, re.IGNORECASE)
-        if resultado:
-            return resultado.group(1)
+    if resultado:
+        return resultado.group(1)
     
-    # 2. Busca qualquer número de 5 a 8 dígitos no topo do texto
-    numeros_topo = re.findall(r"\b\d{5,8}\b", texto[:800])
-    if numeros_topo:
-        return numeros_topo[0]
+    # 2. Se não achou com palavra-chave, vamos olhar o NOME DO ARQUIVO (Sua melhor garantia)
+    # Remove o ".pdf" e tenta pegar os números (ex: de 'L75969.pdf' vira '75969')
+    nome_limpo = Path(nome_arquivo).stem # Pega só 'L75969'
+    numeros_no_nome = re.findall(r"\d+", nome_limpo)
     
-    # 3. ÚLTIMO RECURSO: Pega os números do nome do arquivo (ajuda muito no seu caso L75969.pdf)
-    numeros_nome = re.findall(r"\d+", nome_arquivo)
-    if numeros_nome:
-        return numeros_nome[0]
-        
-    return "0000"
+    if numeros_no_nome:
+        # Retorna o maior número encontrado no nome do arquivo (geralmente é a OC)
+        return max(numeros_no_nome, key=len)
+    
+    # 3. Se tudo falhar, busca o primeiro número grande no texto
+    numeros_avulsos = re.findall(r"\b\d{5,8}\b", texto[:1000])
+    return numeros_avulsos[0] if numeros_avulsos else "0000"
 
 def identificar_fabrica(texto):
     df_f = carregar_aba("fabricas")
