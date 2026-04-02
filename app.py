@@ -30,26 +30,26 @@ def extrair_texto_pdf(pdf_bytes):
     return texto
 
 def extrair_numero_pedido(texto, nome_arquivo):
-    # 1. Tenta achar o número da OC/Pedido no texto (Busca mais rígida)
-    # Procura especificamente por OC: XXXXX ou Pedido: XXXXX
-    padrao_rigido = r"(?:OC|PEDIDO|ORDEM|COMPRA)\s*[:.\-]?\s*(\d{5,})"
+    """
+    Busca o número da OC com prioridade máxima.
+    Se não achar no texto, extrai do nome do arquivo (ex: L75969 -> 75969).
+    """
+    # 1. Padrão rígido no texto
+    padrao_rigido = r"(?:OC|PEDIDO|ORDEM|COMPRA)\s*[:.\-]?\s*(\d{4,})"
     resultado = re.search(padrao_rigido, texto, re.IGNORECASE)
-    
     if resultado:
         return resultado.group(1)
-    
-    # 2. Se não achou com palavra-chave, vamos olhar o NOME DO ARQUIVO (Sua melhor garantia)
-    # Remove o ".pdf" e tenta pegar os números (ex: de 'L75969.pdf' vira '75969')
-    nome_limpo = Path(nome_arquivo).stem # Pega só 'L75969'
-    numeros_no_nome = re.findall(r"\d+", nome_limpo)
-    
+
+    # 2. Prioridade ao Nome do Arquivo (Sua garantia contra o '000634' errado)
+    nome_sem_extensao = Path(nome_arquivo).stem
+    numeros_no_nome = re.findall(r"\d+", nome_sem_extensao)
     if numeros_no_nome:
-        # Retorna o maior número encontrado no nome do arquivo (geralmente é a OC)
+        # Pega o maior número encontrado no nome (ex: 75969)
         return max(numeros_no_nome, key=len)
-    
-    # 3. Se tudo falhar, busca o primeiro número grande no texto
-    numeros_avulsos = re.findall(r"\b\d{5,8}\b", texto[:1000])
-    return numeros_avulsos[0] if numeros_avulsos else "0000"
+
+    # 3. Busca qualquer número de 5 a 8 dígitos no topo do texto
+    numeros_topo = re.findall(r"\b\d{5,8}\b", texto[:1000])
+    return numeros_topo[0] if numeros_topo else "SEM_NUMERO"
 
 def identificar_fabrica(texto):
     df_f = carregar_aba("fabricas")
@@ -64,34 +64,28 @@ def processar_pedido(texto, layout, f_info):
     itens = []
     if layout == "carajas":
         for linha in texto.splitlines():
-            # Regex específica para o padrão de colunas da Carajás
             m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
             if m: 
                 itens.append({
                     "sku": re.sub(r"\D", "", m.group(1)), 
                     "quantidade": int(m.group(2))
                 })
-    
     df = pd.DataFrame(itens)
     if not df.empty:
         df["origem"] = f_info["operacao"]
         df["desconto"] = f_info["desconto"]
     return df
 
-# --- INTERFACE ---
-# CSS para inverter a logo caso o tema seja escuro (se a logo original for preta)
+# --- INTERFACE E CSS PARA LOGO ---
 st.markdown(
     """
     <style>
-    /* Detecta se o Streamlit está em modo escuro e aplica filtro na imagem */
+    /* Seletor para a logo: Garante que ela apareça em ambos os temas */
     [data-testid="stAppViewBlockContainer"] img {
-        filter: brightness(0) invert(1); /* Isso torna o que é preto em branco */
-    }
-    /* Se o fundo for claro, removemos o filtro (opcional, depende da logo) */
-    @media (prefers-color-scheme: light) {
-        [data-testid="stAppViewBlockContainer"] img {
-            filter: none;
-        }
+        background-color: rgba(255, 255, 255, 0.9); /* Fundo branco suave */
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
     }
     </style>
     """,
@@ -99,9 +93,9 @@ st.markdown(
 )
 
 if LOGO_PATH.exists():
-    col_esq, col_logo, col_dir = st.columns([2, 2, 1])
+    col_esq, col_logo, col_dir = st.columns([1, 2, 1])
     with col_logo:
-        st.image(Image.open(str(LOGO_PATH)), width=180)
+        st.image(Image.open(str(LOGO_PATH)), width=200)
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
@@ -124,57 +118,48 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         conteudo = arquivo.read()
         texto_pdf = extrair_texto_pdf(conteudo)
         f_info = identificar_fabrica(texto_pdf)
-        
-        # Identificação do número do pedido/OC
         num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
         ultimo_num_pedido = num_pedido 
 
         if f_info is not None:
             df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
             if not df_individual.empty:
-                # NOME FORMATADO: CARAJAS 75969
                 nome_formatado = f"{sel_display.upper()} {num_pedido}"
                 
-                # Adiciona à lista consolidada
                 df_temp = df_individual.copy()
                 df_temp["pedido"] = num_pedido
                 df_temp["arquivo_origem"] = arquivo.name
                 lista_dfs.append(df_temp)
                 
-                # Gera CSV para o dicionário do ZIP
                 csv_buffer = io.StringIO()
                 df_individual.to_csv(csv_buffer, index=False)
                 arquivos_csv_zip[f"{nome_formatado}.csv"] = csv_buffer.getvalue()
         else:
-            st.error(f"❌ Fábrica não identificada no arquivo: {arquivo.name}")
+            st.error(f"❌ Fábrica não identificada: {arquivo.name}")
 
-    # --- RESULTADOS E EXPORTAÇÃO ---
     if lista_dfs:
         df_final = pd.concat(lista_dfs, ignore_index=True)
         st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s)!")
         st.dataframe(df_final, use_container_width=True)
         
         cliente_label = sel_display.upper()
-        nome_arquivo_bt = f"{cliente_label} {ultimo_num_pedido}" if len(arquivos) == 1 else f"{cliente_label} MULTIPLOS"
+        nome_btn = f"{cliente_label} {ultimo_num_pedido}" if len(arquivos) == 1 else f"{cliente_label} MULTIPLOS"
 
         st.write("---")
         c1, c2 = st.columns(2)
-        
         with c1:
             st.download_button(
-                label=f"⬇️ Baixar {nome_arquivo_bt}.csv",
+                label=f"⬇️ Baixar {nome_btn}.csv",
                 data=df_final.to_csv(index=False).encode('utf-8'),
-                file_name=f"{nome_arquivo_bt}.csv",
+                file_name=f"{nome_btn}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
-        
         with c2:
             zip_io = io.BytesIO()
             with zipfile.ZipFile(zip_io, "w") as zf:
                 for nome, conteudo in arquivos_csv_zip.items():
                     zf.writestr(nome.upper(), conteudo)
-            
             st.download_button(
                 label="📦 Baixar Separados (ZIP)",
                 data=zip_io.getvalue(),
