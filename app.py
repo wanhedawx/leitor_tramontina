@@ -12,51 +12,42 @@ st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
-# Nome do seu arquivo único de escrita branca
-LOGO_PATH = INFOS_DIR / "logo_light.png" 
 
-# --- 2. FUNÇÕES DE SUPORTE ---
-def get_image_base64(path):
-    """Lê a imagem e converte para base64 para o HTML aceitar."""
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+# Caminhos das duas logos
+LOGO_PARA_FUNDO_BRANCO = INFOS_DIR / "logo_dark.png"  # Escrita escura
+LOGO_PARA_FUNDO_ESCURO = INFOS_DIR / "logo_light.png" # Escrita branca
 
-@st.cache_data
-def carregar_aba(aba):
-    return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
+# --- 2. EXIBIÇÃO DA LOGO DINÂMICA ---
+# O Streamlit troca automaticamente baseado no tema do usuário
+if LOGO_PARA_FUNDO_BRANCO.exists() and LOGO_PARA_FUNDO_ESCURO.exists():
+    st.logo(
+        image=str(LOGO_PARA_FUNDO_BRANCO),       # Mostra esta no modo claro
+        dark_theme=str(LOGO_PARA_FUNDO_ESCURO), # Mostra esta no modo escuro
+        size="large"
+    )
+else:
+    # Caso os arquivos tenham nomes diferentes, exibe aviso
+    st.warning("Verifique se logo_dark.png e logo_light.png estão na pasta infos.")
 
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
+st.write("---")
+
+# --- 3. FUNÇÃO DE EXTRAÇÃO (CORREÇÃO DO NÚMERO L75969) ---
 def extrair_numero_pedido(texto, nome_arquivo):
-    """Prioridade total ao nome do arquivo para evitar o erro '000634'."""
+    """Prioriza o número no nome do arquivo para ignorar o '000634' interno."""
     nome_sem_ext = Path(nome_arquivo).stem
     numeros_no_nome = re.findall(r"\d+", nome_sem_ext)
-    # Filtra números com 4 ou mais dígitos (ex: 75969)
+    
+    # Se achar número no nome (ex: 75969), usa ele
     if numeros_validos := [n for n in numeros_no_nome if len(n) >= 4]:
         return max(numeros_validos, key=len)
     
-    # Se não achar no nome, busca no texto do PDF
+    # Só busca no texto se o nome do arquivo estiver limpo
     padrao = r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})"
     resultado = re.search(padrao, texto, re.IGNORECASE)
     return resultado.group(1) if resultado else "SEM_NUMERO"
 
-# --- 3. CSS PARA AUTO-CONTRASTE (LOGO BRANCA -> PRETA) ---
-st.markdown(
-    """
-    <style>
-    .logo-custom {
-        width: 200px;
-        display: block;
-        margin: 0 auto;
-    }
-    /* Detecta Modo Claro: Inverte o branco para preto */
-    @media (prefers-color-scheme: light) {
-        .logo-custom {
-            filter: invert(1) brightness(0.2); 
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# --- CONTINUE COM O RESTANTE DO SEU CÓDIGO (PROCESSAMENTO) ---
 
 # --- 4. INTERFACE: LOGO ---
 if LOGO_PATH.exists():
