@@ -79,6 +79,25 @@ def processar_pedido(texto, layout, f_info):
     return df
 
 # --- INTERFACE ---
+# CSS para inverter a logo caso o tema seja escuro (se a logo original for preta)
+st.markdown(
+    """
+    <style>
+    /* Detecta se o Streamlit está em modo escuro e aplica filtro na imagem */
+    [data-testid="stAppViewBlockContainer"] img {
+        filter: brightness(0) invert(1); /* Isso torna o que é preto em branco */
+    }
+    /* Se o fundo for claro, removemos o filtro (opcional, depende da logo) */
+    @media (prefers-color-scheme: light) {
+        [data-testid="stAppViewBlockContainer"] img {
+            filter: none;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 if LOGO_PATH.exists():
     col_esq, col_logo, col_dir = st.columns([2, 2, 1])
     with col_logo:
