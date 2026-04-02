@@ -29,7 +29,7 @@ def carregar_aba(aba):
         pass
     return pd.DataFrame()
 
-# --- 3. CSS: LOGO E ESTABILIDADE ---
+# --- 3. CSS SEGURO ---
 st.markdown(
     """
     <style>
@@ -52,7 +52,7 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. ENTRADAS ---
+# --- 5. LÓGICA DE PROCESSAMENTO ---
 df_clientes = carregar_aba("clientes")
 if not df_clientes.empty:
     opcoes = {c.replace("_", " ").title(): c for c in df_clientes['cliente'].unique()}
@@ -60,62 +60,63 @@ if not df_clientes.empty:
     arquivos = st.file_uploader("2. Envie os PDFs dos pedidos", type=["pdf"], accept_multiple_files=True)
 
     if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
-        lista_dfs = []
-        arquivos_csv_dict = {} # Variável corrigida aqui
+        lista_final_dfs = []
+        dicionario_csvs = {} 
         
         try:
+            placeholder = st.empty()
+            placeholder.info("⏳ Processando... Aguarde.")
+            
             for arquivo in arquivos:
-                dados_pdf = []
-                with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
+                # Resetando o ponteiro do arquivo para evitar leitura vazia
+                arquivo.seek(0)
+                pdf_bytes = arquivo.read()
+                dados_deste_pdf = []
+                
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
                     for page in pdf.pages:
                         tabela = page.extract_table()
-                        if tabela:
+                        if tabela and len(tabela) > 1:
+                            # Cria o DF e remove colunas sem nome ou repetidas
                             df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
+                            df_temp = df_temp.loc[:, df_temp.columns.notna()].copy()
                             df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()].copy()
+                            
                             df_temp['arquivo_origem'] = arquivo.name
-                            dados_pdf.append(df_temp)
+                            dados_deste_pdf.append(df_temp)
                 
-                if dados_pdf:
-                    df_individual = pd.concat(dados_pdf, ignore_index=True)
-                    lista_dfs.append(df_individual)
-                    # Armazena o CSV individual para o ZIP
-                    arquivos_csv_dict[arquivo.name] = df_individual.to_csv(index=False).encode('utf-8')
+                if dados_deste_pdf:
+                    df_individual = pd.concat(dados_deste_pdf, ignore_index=True)
+                    lista_final_dfs.append(df_individual)
+                    dicionario_csvs[arquivo.name] = df_individual.to_csv(index=False).encode('utf-8')
 
-            if lista_dfs:
-                df_consolidado = pd.concat(lista_dfs, ignore_index=True)
+            placeholder.empty()
+
+            if lista_final_dfs:
+                df_consolidado = pd.concat(lista_final_dfs, ignore_index=True)
                 
                 st.success(f"✅ {len(arquivos)} pedido(s) processado(s)!")
                 st.dataframe(df_consolidado, use_container_width=True)
                 
                 st.write("---")
                 
-                # --- BOTÕES LADO A LADO ---
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.download_button(
-                        label="📥 Baixar Tudo (Único CSV)",
-                        data=df_consolidado.to_csv(index=False).encode('utf-8'),
-                        file_name=f"CONSOLIDADO_{opcoes[sel_display].upper()}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                
-                with col2:
-                    # Gera o ZIP na memória
+                # Colunas lado a lado para os botões
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.download_button("📥 Baixar Tudo (Único CSV)", 
+                                       df_consolidado.to_csv(index=False).encode('utf-8'),
+                                       "CONSOLIDADO.csv", "text/csv", use_container_width=True)
+                with c2:
                     buf = io.BytesIO()
                     with zipfile.ZipFile(buf, "w") as zf:
-                        for nome_arq, conteudo in arquivos_csv_dict.items():
-                            zf.writestr(nome_arq.replace(".pdf", ".csv"), conteudo)
-                    
-                    st.download_button(
-                        label="📦 Baixar Separados (ZIP)",
-                        data=buf.getvalue(),
-                        file_name="PEDIDOS_SEPARADOS.zip",
-                        mime="application/zip",
-                        use_container_width=True
-                    )
+                        for nome, dados in dicionario_csvs.items():
+                            zf.writestr(nome.replace(".pdf", ".csv"), dados)
+                    st.download_button("📦 Baixar Separados (ZIP)", 
+                                       buf.getvalue(), "PEDIDOS.zip", "application/zip", use_container_width=True)
+            else:
+                st.warning("Nenhum dado encontrado nos arquivos enviados.")
+
         except Exception as e:
-            st.error(f"Erro ao processar: {e}")
+            st.error(f"Erro Crítico: {e}")
 else:
-    st.warning("Aba 'clientes' não encontrada no regras_fabricas.xlsx.")
+    st.warning("Verifique o arquivo 'regras_fabricas.xlsx'.")
