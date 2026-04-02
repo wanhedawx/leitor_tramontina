@@ -60,57 +60,45 @@ def processar_pedido(texto, layout, f_info):
     return df
 
 # --- INTERFACE ---
-# --- INTERFACE ---
-if LOGO_PATH.exists():
-    _, col_img, _ = st.columns([1, 1, 1])
-    col_img.image(Image.open(str(LOGO_PATH)), width=150)
+# ... (mantenha o código anterior da logo e selectbox)
 
-st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
-st.write("---")
+# 2. Alteração para aceitar múltiplos PDFs
+arquivos = st.file_uploader("2. Envie os PDFs dos pedidos", type=["pdf"], accept_multiple_files=True)
 
-# Carregamento da base
-clientes_df = carregar_aba("clientes")
-
-# AJUSTE: 'casa_vieira' vira 'Casa Vieira'
-opcoes_clientes = {
-    c.replace("_", " ").title(): c 
-    for c in clientes_df['cliente'].unique()
-}
-
-sel_display = st.selectbox(
-    "1. Selecione o Cliente", 
-    options=list(opcoes_clientes.keys()), 
-    index=None, 
-    placeholder="Escolha um cliente..."
-)
-
-arquivo = st.file_uploader("2. Envie o PDF do pedido", type=["pdf"])
-
-if st.button("🚀 Processar Pedido", use_container_width=True, type="primary", disabled=not arquivo or not sel_display):
-    # Recupera o nome original (ex: casa_vieira) para o banco de dados
+if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary", disabled=not arquivos or not sel_display):
     cliente_original = opcoes_clientes[sel_display]
+    c_info = clientes_df[clientes_df['cliente'] == cliente_original].iloc[0]
     
-    texto_pdf = extrair_texto_pdf(arquivo.read())
-    f_info = identificar_fabrica(texto_pdf)
+    lista_dfs = [] # Lista para guardar os resultados de cada PDF
     
-    if f_info is None:
-        st.error("❌ Fábrica não identificada no PDF.")
-    else:
-        c_info = clientes_df[clientes_df['cliente'] == cliente_original].iloc[0]
-        df_final = processar_pedido(texto_pdf, c_info['layout'], f_info)
+    for arquivo in arquivos:
+        texto_pdf = extrair_texto_pdf(arquivo.read())
+        f_info = identificar_fabrica(texto_pdf)
         
-        if df_final.empty:
-            st.warning("⚠️ Nenhum item extraído.")
+        if f_info is not None:
+            df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
+            if not df_individual.empty:
+                # Adiciona o nome do arquivo para você saber de qual pedido veio
+                df_individual["arquivo_origem"] = arquivo.name
+                lista_dfs.append(df_individual)
         else:
-            st.success(f"✅ Pedido processado! Fábrica: {f_info['fabrica']}")
-            st.dataframe(df_final, use_container_width=True)
-            
-            # Download do CSV
-            csv = df_final.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Baixar Resultado (CSV)",
-                data=csv,
-                file_name=f"pedido_{cliente_original}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+            st.error(f"❌ Fábrica não identificada no arquivo: {arquivo.name}")
+
+    # Junta todos os PDFs processados em um único DataFrame
+    if lista_dfs:
+        df_final = pd.concat(lista_dfs, ignore_index=True)
+        
+        st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s) com sucesso!")
+        st.dataframe(df_final, use_container_width=True)
+        
+        # Download do consolidado
+        csv = df_final.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="⬇️ Baixar Tudo em CSV (Consolidado)",
+            data=csv,
+            file_name=f"pedidos_consolidados_{cliente_original}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.warning("⚠️ Nenhum item foi extraído dos arquivos enviados.")
