@@ -60,6 +60,7 @@ def processar_pedido(texto, layout, f_info):
     return df
 
 # --- INTERFACE ---
+# --- INTERFACE ---
 if LOGO_PATH.exists():
     _, col_img, _ = st.columns([1, 1, 1])
     col_img.image(Image.open(str(LOGO_PATH)), width=150)
@@ -70,10 +71,9 @@ st.write("---")
 # Carregamento da base
 clientes_df = carregar_aba("clientes")
 
-# AJUSTE SOLICITADO: Criar dicionário para exibir nomes limpos no selectbox
-# 'CASA_VIEIRA' vira 'CASA VIEIRA'
+# AJUSTE: 'casa_vieira' vira 'Casa Vieira'
 opcoes_clientes = {
-    c.replace("_", " ").upper(): c 
+    c.replace("_", " ").title(): c 
     for c in clientes_df['cliente'].unique()
 }
 
@@ -87,7 +87,7 @@ sel_display = st.selectbox(
 arquivo = st.file_uploader("2. Envie o PDF do pedido", type=["pdf"])
 
 if st.button("🚀 Processar Pedido", use_container_width=True, type="primary", disabled=not arquivo or not sel_display):
-    # Recupera o nome original (com _) para buscar no banco de dados
+    # Recupera o nome original (ex: casa_vieira) para o banco de dados
     cliente_original = opcoes_clientes[sel_display]
     
     texto_pdf = extrair_texto_pdf(arquivo.read())
@@ -105,6 +105,7 @@ if st.button("🚀 Processar Pedido", use_container_width=True, type="primary", 
             st.success(f"✅ Pedido processado! Fábrica: {f_info['fabrica']}")
             st.dataframe(df_final, use_container_width=True)
             
+            # Download do CSV
             csv = df_final.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Baixar Resultado (CSV)",
