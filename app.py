@@ -1,65 +1,106 @@
-import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import io
+import re
 import pandas as pd
 import pdfplumber
-import re
-from PIL import Image
+import streamlit as st
 from pathlib import Path
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tramontina - Gestor de Pedidos", layout="centered")
-
-# Inicializa a conexão
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# Função de carregamento sem cache para testar a conexão limpa
-def carregar_aba(nome_da_aba):
-    # IMPORTANTE: Não passamos a URL aqui, ele pega dos Secrets automaticamente
-    return conn.read(worksheet=nome_da_aba)
-
-# --- INTERFACE ---
+# Configurações de Caminho
 BASE_DIR = Path(__file__).resolve().parent
-LOGO_PATH = BASE_DIR / "logo.png" # Ajuste se estiver em /infos/logo.png
-if LOGO_PATH.exists():
-    _, col_img, _ = st.columns([1, 1, 1])
-    col_img.image(Image.open(str(LOGO_PATH)), width=150)
+CONFIG_PATH = BASE_DIR / "infos" / "regras_fabricas.xlsx"
 
-st.markdown("<h1 style='text-align: center;'>Leitor de Pedidos Automático</h1>", unsafe_allow_html=True)
+# --- FUNÇÕES DE PERSISTÊNCIA (O coração da sua dúvida) ---
+def atualizar_excel(aba, novo_df):
+    """Sobrescreve a aba do Excel com os novos dados sem deletar as outras"""
+    with pd.ExcelWriter(CONFIG_PATH, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+        novo_df.to_excel(writer, sheet_name=aba, index=False)
 
-# Teste de Conexão Imediato
-try:
-    # Tenta ler apenas a primeira aba para validar
-    df_teste = carregar_aba("fabricas")
+@st.cache_data
+def carregar_dados(aba):
+    return pd.read_excel(CONFIG_PATH, sheet_name=aba)
+
+# --- MOTOR DE LEITURA UNIVERSAL ---
+def extrair_dados_padrao(texto, f_info, embalagem_df):
+    """
+    Procura SKUs (7-8 dígitos) e tenta capturar a quantidade próxima.
+    Cruza com a base de embalagens e fábricas automaticamente.
+    """
+    itens = []
+    # Expressão regular para achar SKU Tramontina (ex: 96589068)
+    padrao_sku = re.compile(r"(\d{7,8})")
     
-    menu = st.tabs(["📄 Processar Pedido", "⚙️ Gerenciar Base"])
-
-    with menu[0]:
-        st.subheader("Processamento")
-        df_cli = carregar_aba("clientes")
-        sel_cliente = st.selectbox("Selecione o Cliente", df_cli["cliente"].unique())
-        arquivo = st.file_uploader("Suba o pedido em PDF", type="pdf")
+    linhas = texto.splitlines()
+    for linha in linhas:
+        sku_match = padrao_sku.search(linha)
+        if sku_match:
+            sku = sku_match.group(1)
+            # Tenta achar um número de quantidade na mesma linha (geralmente após o SKU)
+            qtd_match = re.search(r"(?<=\s)(\d{1,4})(?=\s|CX|UN)", linha)
+            qtd = int(qtd_match.group(1)) if qtd_match else 1
+            
+            itens.append({"sku": sku, "quantidade": qtd})
+    
+    df = pd.DataFrame(itens)
+    if not df.empty:
+        # Cruzamento automático com as regras da fábrica
+        df["origem"] = f_info["operacao"]
+        df["desconto"] = f_info["desconto"]
         
-        if st.button("🚀 Iniciar Leitura", use_container_width=True, type="primary"):
-            if arquivo:
-                # Sua lógica de extração aqui
-                st.success("Conectado e pronto para leitura!")
+        # Cruzamento opcional com base de embalagem
+        df = df.merge(embalagem_df, on="sku", how="left")
+        df["embalagem"] = df["embalagem"].fillna(1) # Padrão 1 se não existir
+    
+    return df
 
-    with menu[1]:
-        st.subheader("Atualizar Dados")
-        escolha = st.radio("Escolha a base:", ["fabricas", "clientes", "embalagem"], horizontal=True)
-        df_atual = carregar_aba(escolha)
-        st.dataframe(df_atual, use_container_width=True)
+# --- INTERFACE VERTICAL ---
+st.title("Sistema Automatizado de Pedidos")
+
+# Carregamento inicial
+clientes_df = carregar_dados("clientes")
+fabricas_df = carregar_dados("fabricas")
+embalagem_df = carregar_dados("embalagem")
+
+cliente_nome = st.selectbox("Selecione o Cliente", clientes_df["cliente"].unique())
+arquivo = st.file_uploader("Suba o PDF do Pedido", type="pdf")
+
+if st.button("Processar Agora", type="primary"):
+    if arquivo:
+        with pdfplumber.open(arquivo) as pdf:
+            texto_completo = "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
         
-        with st.expander("➕ Adicionar Novo Registro"):
-            with st.form("form_add"):
-                novos_dados = {col: st.text_input(col) for col in df_atual.columns}
-                if st.form_submit_button("Salvar no Google Sheets"):
-                    df_final = pd.concat([df_atual, pd.DataFrame([novos_dados])], ignore_index=True)
-                    conn.update(worksheet=escolha, data=df_final)
-                    st.cache_data.clear()
-                    st.rerun()
+        # Identifica fábrica pelo CNPJ no texto
+        f_info = None
+        for _, fab in fabricas_df.iterrows():
+            if str(fab["cnpj"]) in texto_completo.replace(".", "").replace("/", "").replace("-", ""):
+                f_info = fab
+                break
+        
+        if f_info is not None:
+            resultado = extrair_dados_padrao(texto_completo, f_info, embalagem_df)
+            st.dataframe(resultado)
+            st.success(f"Pedido processado usando regras da {f_info['fabrica']}")
+        else:
+            st.error("Não achei o CNPJ da fábrica no PDF. Verifique se a fábrica está cadastrada.")
 
-except Exception as e:
-    st.error("⚠️ Erro Crítico de Acesso")
-    st.info("Verifique se o link nos Secrets termina exatamente em 'edit?usp=sharing' e se não há espaços antes ou depois das aspas.")
-    st.warning(f"Detalhe técnico: {e}")
+# --- ÁREA DE CADASTRO (Para não precisar mexer no GitHub) ---
+with st.expander("➕ Cadastrar Novo Cliente ou Item"):
+    aba_alvo = st.radio("O que deseja adicionar?", ["Cliente", "Item/Embalagem"])
+    
+    if aba_alvo == "Cliente":
+        with st.form("form_cliente"):
+            novo_n = st.text_input("Nome do Cliente")
+            if st.form_submit_button("Salvar na Base"):
+                nova_linha = pd.DataFrame([{"cliente": novo_n, "layout": "padrao"}])
+                atualizar_excel("clientes", pd.concat([clientes_df, nova_linha]))
+                st.success("Cliente salvo! Atualize a página.")
+                st.cache_data.clear()
+    
+    else:
+        with st.form("form_item"):
+            n_sku = st.text_input("SKU")
+            n_emb = st.number_input("Qtd Embalagem", min_value=1)
+            if st.form_submit_button("Salvar Item"):
+                nova_linha = pd.DataFrame([{"sku": n_sku, "embalagem": n_emb}])
+                atualizar_excel("embalagem", pd.concat([embalagem_df, nova_linha]))
+                st.success("Item salvo!")
+                st.cache_data.clear()
