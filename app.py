@@ -1,6 +1,7 @@
 import io
 import re
 import base64
+import zipfile
 from pathlib import Path
 import pandas as pd
 import pdfplumber
@@ -26,17 +27,16 @@ def carregar_aba(aba):
     except:
         return pd.DataFrame()
 
-def extrair_numero_pedido(nome_arquivo):
-    numeros = re.findall(r"\d+", Path(nome_arquivo).stem)
-    return max(numeros, key=len) if numeros else "SEM_NUMERO"
-
-# --- 3. CSS: LOGO DINÂMICA ---
+# --- 3. CSS: LOGO E BOTÕES LADO A LADO ---
 st.markdown(
     """
     <style>
     .logo-custom { width: 200px; display: block; margin: 0 auto; }
     @media (prefers-color-scheme: light) { .logo-custom { filter: invert(1) brightness(0.2); } }
     @media (prefers-color-scheme: dark) { .logo-custom { filter: none; } }
+    
+    /* Estilo para os botões finais ficarem lado a lado */
+    div.stDownloadButton { display: inline-block; width: 49%; }
     </style>
     """,
     unsafe_allow_html=True
@@ -50,66 +50,75 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. LÓGICA DE PROCESSAMENTO ---
+# --- 5. ENTRADAS (VERTICAL) ---
 try:
     df_clientes = carregar_aba("clientes")
     if not df_clientes.empty:
         opcoes = {c.replace("_", " ").title(): c for c in df_clientes['cliente'].unique()}
         sel_display = st.selectbox("1. Selecione o Cliente", options=list(opcoes.keys()), index=None)
-        arquivos = st.file_uploader("2. Envie os PDFs", type=["pdf"], accept_multiple_files=True)
+        arquivos = st.file_uploader("2. Envie os PDFs dos pedidos", type=["pdf"], accept_multiple_files=True)
 
         if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
-            cliente_id = opcoes[sel_display]
-            todos_itens_consolidados = []
+            lista_dfs = []
+            arquivos_csv = {} # Para o ZIP
             
             for arquivo in arquivos:
-                num_pedido = extrair_numero_pedido(arquivo.name)
-                dados_do_pdf = []
-                
+                dados_ped = []
                 with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
                     for page in pdf.pages:
                         tabela = page.extract_table()
                         if tabela:
-                            # Converte e já limpa colunas vazias ou duplicadas
+                            # Converte para DF usando a lógica de itens reais
                             df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
-                            # RESOLUÇÃO DO ERRO: Resetando índice e garantindo colunas únicas
                             df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()].copy()
-                            df_temp = df_temp.reset_index(drop=True)
                             
-                            df_temp['Pedido'] = num_pedido
-                            df_temp['Cliente'] = sel_display
-                            dados_do_pdf.append(df_temp)
+                            # Adiciona a coluna de arquivo_origem
+                            df_temp['arquivo_origem'] = arquivo.name
+                            dados_ped.append(df_temp)
                 
-                if dados_do_pdf:
-                    # Junta as páginas do PDF ignorando os índices antigos para evitar o erro de Reindexing
-                    df_final_pedido = pd.concat(dados_do_pdf, ignore_index=True)
-                    todos_itens_consolidados.append(df_final_pedido)
-                    
-                    with st.expander(f"📄 Itens Extraídos: Pedido {num_pedido}", expanded=True):
-                        st.dataframe(df_final_pedido, use_container_width=True)
-                        st.download_button(
-                            label=f"⬇️ Baixar CSV Pedido {num_pedido}",
-                            data=df_final_pedido.to_csv(index=False).encode('utf-8'),
-                            file_name=f"PEDIDO_{num_pedido}.csv",
-                            mime="text/csv",
-                            key=f"btn_{num_pedido}"
-                        )
+                if dados_ped:
+                    df_individual = pd.concat(dados_ped, ignore_index=True)
+                    lista_dfs.append(df_individual)
+                    arquivos_csv[arquivo.name] = df_individual.to_csv(index=False).encode('utf-8')
 
-            if todos_itens_consolidados:
+            if lista_dfs:
+                df_consolidado = pd.concat(lista_dfs, ignore_index=True)
+                
+                st.success(f"✅ {len(arquivos)} pedido(s) processado(s)!")
+                
+                # Exibe a prévia com as colunas solicitadas
+                st.dataframe(df_consolidado, use_container_width=True)
+                
                 st.write("---")
-                # Consolidação final sem conflito de índices
-                df_total = pd.concat(todos_itens_consolidados, ignore_index=True)
-                st.subheader("📦 Arquivo Consolidado")
-                st.dataframe(df_total, use_container_width=True)
-                st.download_button(
-                    label="💾 BAIXAR TODOS OS ITENS CONSOLIDADOS",
-                    data=df_total.to_csv(index=False).encode('utf-8'),
-                    file_name=f"CONSOLIDADO_{cliente_id.upper()}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+                
+                # --- BOTÕES FINAIS LADO A LADO ---
+                col_baixar1, col_baixar2 = st.columns(2)
+                
+                with col_baixar1:
+                    st.download_button(
+                        label="📥 Baixar Tudo (Único CSV)",
+                        data=df_consolidado.to_csv(index=False).encode('utf-8'),
+                        file_name=f"CONSOLIDADO_{opcoes[sel_display].upper()}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                
+                with col_baixar2:
+                    # Gera o arquivo ZIP na memória
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "x", zipfile.ZIP_DEFLATED) as zf:
+                        for nome, conteudo in arquivos_csv.items():
+                            zf.writestr(nome.replace(".pdf", ".csv"), conteudo)
+                    
+                    st.download_button(
+                        label="📦 Baixar Separados (ZIP)",
+                        data=buf.getvalue(),
+                        file_name="PEDIDOS_SEPARADOS.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
     else:
-        st.error("Configure os clientes no arquivo Excel para continuar.")
+        st.error("Erro: Cadastre os clientes no Excel.")
 
 except Exception as e:
-    st.error(f"Erro no processamento: {e}")
+    st.error(f"Erro: {e}")
