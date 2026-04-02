@@ -14,7 +14,7 @@ INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 LOGO_PATH = INFOS_DIR / "logo_light.png"
 
-# --- 2. FUNÇÕES DE SUPORTE ---
+# --- 2. FUNÇÕES ---
 def get_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -50,7 +50,7 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. LÓGICA DE EXTRAÇÃO REAL ---
+# --- 5. LÓGICA DE PROCESSAMENTO ---
 try:
     df_clientes = carregar_aba("clientes")
     if not df_clientes.empty:
@@ -66,26 +66,25 @@ try:
                 num_pedido = extrair_numero_pedido(arquivo.name)
                 dados_do_pdf = []
                 
-                # --- AQUI ESTÁ A LÓGICA DE LEITURA QUE FALTAVA ---
                 with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
                     for page in pdf.pages:
                         tabela = page.extract_table()
                         if tabela:
-                            # Converte a tabela do PDF em DataFrame
+                            # Converte e já limpa colunas vazias ou duplicadas
                             df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
-                            # Adiciona colunas de controle
+                            # RESOLUÇÃO DO ERRO: Resetando índice e garantindo colunas únicas
+                            df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()].copy()
+                            df_temp = df_temp.reset_index(drop=True)
+                            
                             df_temp['Pedido'] = num_pedido
                             df_temp['Cliente'] = sel_display
                             dados_do_pdf.append(df_temp)
                 
                 if dados_do_pdf:
+                    # Junta as páginas do PDF ignorando os índices antigos para evitar o erro de Reindexing
                     df_final_pedido = pd.concat(dados_do_pdf, ignore_index=True)
-                    # Limpeza básica (remove linhas vazias de SKU)
-                    df_final_pedido = df_final_pedido.dropna(how='all') 
-                    
                     todos_itens_consolidados.append(df_final_pedido)
                     
-                    # Prévia Individual
                     with st.expander(f"📄 Itens Extraídos: Pedido {num_pedido}", expanded=True):
                         st.dataframe(df_final_pedido, use_container_width=True)
                         st.download_button(
@@ -96,21 +95,21 @@ try:
                             key=f"btn_{num_pedido}"
                         )
 
-            # --- DOWNLOAD CONSOLIDADO ---
             if todos_itens_consolidados:
                 st.write("---")
+                # Consolidação final sem conflito de índices
                 df_total = pd.concat(todos_itens_consolidados, ignore_index=True)
-                st.subheader("📦 Arquivo Consolidado (Todos os Itens)")
+                st.subheader("📦 Arquivo Consolidado")
                 st.dataframe(df_total, use_container_width=True)
                 st.download_button(
-                    label="💾 BAIXAR TUDO EM UM ÚNICO CSV",
+                    label="💾 BAIXAR TODOS OS ITENS CONSOLIDADOS",
                     data=df_total.to_csv(index=False).encode('utf-8'),
                     file_name=f"CONSOLIDADO_{cliente_id.upper()}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
     else:
-        st.error("Erro: Aba 'clientes' não encontrada no Excel.")
+        st.error("Configure os clientes no arquivo Excel para continuar.")
 
 except Exception as e:
     st.error(f"Erro no processamento: {e}")
