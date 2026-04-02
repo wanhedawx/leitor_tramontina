@@ -81,19 +81,22 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         conteudo = arquivo.read()
         texto_pdf = extrair_texto_pdf(conteudo)
         f_info = identificar_fabrica(texto_pdf)
-        
         if f_info is not None:
-            df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
-            if not df_individual.empty:
-                # Adiciona coluna de origem para o consolidado
-                df_consolidado_parte = df_individual.copy()
-                ome_limpo = Path(arquivo.name).stem  # remove .pdf
-                df_consolidado_parte["arquivo_origem"] = nome_limpo
-                
-                # Guarda o CSV individual (sem a coluna arquivo_origem para ficar limpo)
-                csv_buffer = io.StringIO()
-                df_individual.to_csv(csv_buffer, index=False)
-                arquivos_csv_zip[f"{arquivo.name.replace('.pdf', '')}.csv"] = csv_buffer.getvalue()
+            
+df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
+    if not df_individual.empty:
+        # Adiciona coluna de origem para o consolidado
+        df_consolidado_parte = df_individual.copy()
+        
+        nome_limpo = Path(arquivo.name).stem  # remove .pdf
+        df_consolidado_parte["arquivo_origem"] = nome_limpo
+        
+        lista_dfs.append(df_consolidado_parte)  # 👈 FALTAVA ISSO
+        
+        # Guarda o CSV individual
+        csv_buffer = io.StringIO()
+        df_individual.to_csv(csv_buffer, index=False)
+        arquivos_csv_zip[f"{nome_limpo}.csv"] = csv_buffer.getvalue()
         else:
             st.error(f"❌ Fábrica não identificada: {arquivo.name}")
 
