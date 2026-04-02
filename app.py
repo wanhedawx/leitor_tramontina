@@ -60,6 +60,30 @@ def processar_pedido(texto, layout, f_info):
     return df
 
 # --- INTERFACE ---
+if LOGO_PATH.exists():
+    _, col_img, _ = st.columns([1, 1, 1])
+    col_img.image(Image.open(str(LOGO_PATH)), width=150)
+
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
+st.write("---")
+
+# Carregamento da base
+clientes_df = carregar_aba("clientes")
+
+# AJUSTE: 'casa_vieira' vira 'Casa Vieira'
+opcoes_clientes = {
+    c.replace("_", " ").title(): c 
+    for c in clientes_df['cliente'].unique()
+}
+
+sel_display = st.selectbox(
+    "1. Selecione o Cliente", 
+    options=list(opcoes_clientes.keys()), 
+    index=None, 
+    placeholder="Escolha um cliente..."
+)
+
+# --- INTERFACE ---
 # ... (mantenha o código anterior da logo e selectbox)
 
 # 2. Alteração para aceitar múltiplos PDFs
