@@ -1,6 +1,6 @@
 import io
 import re
-import zipfile  # Nova biblioteca para compactar os arquivos
+import zipfile 
 from pathlib import Path
 from PIL import Image
 import pandas as pd
