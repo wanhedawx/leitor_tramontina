@@ -15,18 +15,40 @@ CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
 LOGO_PATH = INFOS_DIR / "logo_dark.png" 
 
 st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
+import io
+import re
+import base64
+from pathlib import Path
+import pandas as pd
+import pdfplumber
+import streamlit as st
 
-# --- CSS PARA LOGO ÚNICA (MODO CLARO E ESCURO) ---
+# --- CONFIGURAÇÃO DE CAMINHOS ---
+BASE_DIR = Path(__file__).resolve().parent
+INFOS_DIR = BASE_DIR / "infos"
+LOGO_PATH = INFOS_DIR / "logo_light.png" # Sua logo de escrita branca
+
+# --- FUNÇÃO PARA CARREGAR IMAGEM ---
+def get_image_base64(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+# --- CSS PARA AUTO-CONTRASTE (LOGO BRANCA -> PRETA) ---
 st.markdown(
     """
     <style>
-    /* Cria um fundo branco fixo para a logo preta não sumir no modo escuro */
-    .logo-container {
-        background-color: white;
-        padding: 10px;
-        border-radius: 10px;
-        display: inline-block;
-        margin-bottom: 20px;
+    /* Estilo padrão da logo */
+    .logo-custom {
+        width: 200px;
+        display: block;
+        margin: 0 auto;
+    }
+
+    /* SE O TEMA FOR CLARO: Inverte a cor (Branco vira Preto) */
+    @media (prefers-color-scheme: light) {
+        .logo-custom {
+            filter: invert(1) brightness(0.2); 
+        }
     }
     </style>
     """,
@@ -35,15 +57,35 @@ st.markdown(
 
 # --- INTERFACE: LOGO ---
 if LOGO_PATH.exists():
+    img_b64 = get_image_base64(str(LOGO_PATH))
     col_esq, col_logo, col_dir = st.columns([1, 2, 1])
     with col_logo:
-        # Coloca a logo dentro do container branco definido no CSS
-        st.markdown('<div style="text-align: center;"><div class="logo-container">', unsafe_allow_html=True)
-        st.image(Image.open(str(LOGO_PATH)), width=180)
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">',
+            unsafe_allow_html=True
+        )
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
+
+# --- FUNÇÃO DE EXTRAÇÃO CORRIGIDA (PEGA O L75969) ---
+def extrair_numero_pedido(texto, nome_arquivo):
+    """
+    Dá prioridade total ao nome do arquivo para não pegar o número errado do PDF.
+    """
+    # 1. Tenta extrair do nome do arquivo (ex: L75969.pdf -> 75969)
+    nome_sem_ext = Path(nome_arquivo).stem
+    numeros_no_nome = re.findall(r"\d+", nome_sem_ext)
+    if numeros_no_nome:
+        # Pega o maior número encontrado no nome
+        return max(numeros_no_nome, key=len)
+    
+    # 2. Se falhar, busca no texto
+    resultado = re.search(r"(?:OC|PEDIDO|ORDEM)\s*[:.\-]?\s*(\d{4,})", texto, re.IGNORECASE)
+    return resultado.group(1) if resultado else "SEM_NUMERO"
+
+# --- RESTO DO SEU CÓDIGO ---
+# (Mantenha o seu uploader e a lógica de processamento que já funciona)
 
 # --- FUNÇÕES DE EXTRAÇÃO ---
 @st.cache_data
