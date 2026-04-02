@@ -1,135 +1,121 @@
 import io
 import re
-import base64
-import zipfile
+import zipfile  # Nova biblioteca para compactar os arquivos
 from pathlib import Path
+from PIL import Image
 import pandas as pd
 import pdfplumber
 import streamlit as st
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
-
+# --- CONFIGURAÇÃO E CAMINHOS ---
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
-LOGO_PATH = INFOS_DIR / "logo_light.png"
+LOGO_PATH = INFOS_DIR / "logo.png"
 
-# --- 2. FUNÇÕES ---
-def get_image_base64(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+st.set_page_config(page_title="Processador de Pedidos Tramontina", page_icon="📄", layout="centered")
 
 @st.cache_data
 def carregar_aba(aba):
-    try:
-        if CONFIG_PATH.exists():
-            return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
-    except:
-        pass
-    return pd.DataFrame()
+    return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
 
-# --- 3. CSS SEGURO ---
-st.markdown(
-    """
-    <style>
-    .logo-custom { width: 200px; display: block; margin: 0 auto; }
-    @media (prefers-color-scheme: light) { .logo-custom { filter: invert(1) brightness(0.2); } }
-    @media (prefers-color-scheme: dark) { .logo-custom { filter: none; } }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+def extrair_texto_pdf(pdf_bytes):
+    texto = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for p in pdf.pages:
+            texto += (p.extract_text() or "") + "\n"
+    return texto
 
-# --- 4. INTERFACE ---
+def identificar_fabrica(texto):
+    df_f = carregar_aba("fabricas")
+    texto_limpo = re.sub(r"\D", "", texto)
+    for _, row in df_f.iterrows():
+        cnpj_limpo = re.sub(r"\D", "", str(row['cnpj'])).zfill(14)
+        if cnpj_limpo in texto_limpo:
+            return row
+    return None
+
+def processar_pedido(texto, layout, f_info):
+    itens = []
+    if layout == "palato":
+        for linha in texto.splitlines():
+            if "Tramontina" in linha:
+                sku = re.search(r"\b\d{7,8}\b", linha)
+                qtd = re.search(r"\s(\d+)\s+(CX|UN)/", linha)
+                if sku and qtd: 
+                    itens.append({"sku": sku.group(), "quantidade": int(qtd.group(1))})
+    elif layout == "carajas":
+        for linha in texto.splitlines():
+            m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
+            if m: 
+                itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
+    
+    df = pd.DataFrame(itens)
+    if not df.empty:
+        df["origem"] = f_info["operacao"]
+        df["desconto"] = f_info["desconto"]
+    return df
+
+# --- INTERFACE ---
 if LOGO_PATH.exists():
-    try:
-        img_b64 = get_image_base64(str(LOGO_PATH))
-        st.markdown(f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">', unsafe_allow_html=True)
-    except:
-        pass
+    _, col_img, _ = st.columns([1, 1, 1])
+    col_img.image(Image.open(str(LOGO_PATH)), width=150)
 
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. LÓGICA DE PROCESSAMENTO ---
-df_clientes = carregar_aba("clientes")
-if not df_clientes.empty:
-    opcoes = {c.replace("_", " ").title(): c for c in df_clientes['cliente'].unique()}
-    sel_display = st.selectbox("1. Selecione o Cliente", options=list(opcoes.keys()), index=None)
-    arquivos = st.file_uploader("2. Envie os PDFs dos pedidos", type=["pdf"], accept_multiple_files=True)
+clientes_df = carregar_aba("clientes")
+opcoes_clientes = {c.replace("_", " ").title(): c for c in clientes_df['cliente'].unique()}
 
-    if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
-        lista_final_dfs = []
-        dicionario_csvs = {} 
+sel_display = st.selectbox("1. Selecione o Cliente", options=list(opcoes_clientes.keys()), index=None, placeholder="Escolha um cliente...")
+arquivos = st.file_uploader("2. Envie os PDFs dos pedidos", type=["pdf"], accept_multiple_files=True)
+
+if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary", disabled=not arquivos or not sel_display):
+    cliente_original = opcoes_clientes[sel_display]
+    c_info = clientes_df[clientes_df['cliente'] == cliente_original].iloc[0]
+    
+    lista_dfs = []
+    arquivos_csv_zip = {} # Dicionário para guardar os CSVs individuais para o ZIP
+
+    for arquivo in arquivos:
+        conteudo = arquivo.read()
+        texto_pdf = extrair_texto_pdf(conteudo)
+        f_info = identificar_fabrica(texto_pdf)
         
-        # Colunas que queremos manter conforme a tratativa anterior
-        colunas_alvo = ['sku', 'quantidade', 'origem', 'desconto']
+        if f_info is not None:
+            df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
+            if not df_individual.empty:
+                # Adiciona coluna de origem para o consolidado
+                df_consolidado_parte = df_individual.copy()
+                df_consolidado_parte["arquivo_origem"] = arquivo.name
+                lista_dfs.append(df_consolidado_parte)
+                
+                # Guarda o CSV individual (sem a coluna arquivo_origem para ficar limpo)
+                csv_buffer = io.StringIO()
+                df_individual.to_csv(csv_buffer, index=False)
+                arquivos_csv_zip[f"{arquivo.name.replace('.pdf', '')}.csv"] = csv_buffer.getvalue()
+        else:
+            st.error(f"❌ Fábrica não identificada: {arquivo.name}")
+
+    if lista_dfs:
+        df_final = pd.concat(lista_dfs, ignore_index=True)
+        st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s)!")
+        st.dataframe(df_final, use_container_width=True)
         
-        try:
-            placeholder = st.empty()
-            placeholder.info("⏳ Filtrando dados dos pedidos...")
+        col1, col2 = st.columns(2)
+        
+        # DOWNLOAD 1: TUDO JUNTO (CSV)
+        with col1:
+            csv_total = df_final.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Baixar Tudo (Único CSV)", csv_total, f"consolidado_{cliente_original}.csv", "text/csv", use_container_width=True)
+        
+        # DOWNLOAD 2: SEPARADOS (ZIP)
+        with col2:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for nome_arquivo, conteudo_csv in arquivos_csv_zip.items():
+                    zf.writestr(nome_arquivo, conteudo_csv)
             
-            for arquivo in arquivos:
-                arquivo.seek(0)
-                pdf_bytes = arquivo.read()
-                dados_deste_pdf = []
-                
-                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                    for page in pdf.pages:
-                        tabela = page.extract_table()
-                        if tabela and len(tabela) > 1:
-                            df_temp = pd.DataFrame(tabela[1:], columns=tabela[0])
-                            
-                            # TRATATIVA: Deixa as colunas em minúsculo e limpa espaços para bater com o filtro
-                            df_temp.columns = [str(c).strip().lower() for c in df_temp.columns]
-                            
-                            # Filtra apenas as colunas que existem no PDF e que estão na nossa lista alvo
-                            colunas_presentes = [c for c in colunas_alvo if c in df_temp.columns]
-                            
-                            if colunas_presentes:
-                                df_filtrado = df_temp[colunas_presentes].copy()
-                                
-                                # Remove linhas onde o SKU está vazio (sujeira do PDF)
-                                if 'sku' in df_filtrado.columns:
-                                    df_filtrado = df_filtrado[df_filtrado['sku'].notna() & (df_filtrado['sku'] != '')]
-                                
-                                df_filtrado['arquivo_origem'] = arquivo.name
-                                dados_deste_pdf.append(df_filtrado)
-                
-                if dados_deste_pdf:
-                    df_individual = pd.concat(dados_deste_pdf, ignore_index=True)
-                    lista_final_dfs.append(df_individual)
-                    dicionario_csvs[arquivo.name] = df_individual.to_csv(index=False).encode('utf-8')
-
-            placeholder.empty()
-
-            if lista_final_dfs:
-                df_consolidado = pd.concat(lista_final_dfs, ignore_index=True)
-                
-                st.success(f"✅ {len(arquivos)} pedido(s) processado(s)!")
-                
-                # Exibe a prévia limpa
-                st.dataframe(df_consolidado, use_container_width=True)
-                
-                st.write("---")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.download_button("📥 Baixar Tudo (Único CSV)", 
-                                       df_consolidado.to_csv(index=False).encode('utf-8'),
-                                       "CONSOLIDADO.csv", "text/csv", use_container_width=True)
-                with c2:
-                    buf = io.BytesIO()
-                    with zipfile.ZipFile(buf, "w") as zf:
-                        for nome, dados in dicionario_csvs.items():
-                            zf.writestr(nome.replace(".pdf", ".csv"), dados)
-                    st.download_button("📦 Baixar Separados (ZIP)", 
-                                       buf.getvalue(), "PEDIDOS.zip", "application/zip", use_container_width=True)
-            else:
-                st.warning("Não encontrei as colunas de SKU/Quantidade nos PDFs.")
-
-        except Exception as e:
-            st.error(f"Erro na filtragem: {e}")
-else:
-    st.warning("Verifique o arquivo 'regras_fabricas.xlsx'.")
+            st.download_button("📦 Baixar Separados (ZIP)", zip_buffer.getvalue(), f"pedidos_separados_{cliente_original}.zip", "application/zip", use_container_width=True)
+    else:
+        st.warning("⚠️ Nenhum dado extraído.")
