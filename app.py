@@ -39,6 +39,11 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+# --- 4. INTERFACE: LOGO ---
+
+
+st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
+st.write("---")
 
 
 # --- 5. ENTRADA DE DADOS E OPÇÕES ---
