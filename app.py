@@ -6,22 +6,19 @@ import pandas as pd
 import pdfplumber
 import streamlit as st
 
-# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Processador de Pedidos", page_icon="📄", layout="centered")
 
 BASE_DIR = Path(__file__).resolve().parent
 INFOS_DIR = BASE_DIR / "infos"
 CONFIG_PATH = INFOS_DIR / "regras_fabricas.xlsx"
-LOGO_PATH = INFOS_DIR / "logo_light.png" # Sua logo de escrita BRANCA
+LOGO_PATH = INFOS_DIR / "logo_light.png"
 
-# --- 2. FUNÇÕES (DEFINIDAS ANTES DO USO) ---
 def get_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
 @st.cache_data
 def carregar_aba(aba):
-    """Carrega as abas do Excel de configuração."""
     try:
         return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
     except Exception as e:
@@ -29,11 +26,9 @@ def carregar_aba(aba):
         return pd.DataFrame()
 
 def extrair_numero_pedido(nome_arquivo):
-    """Extrai o número (ex: 75969) do nome do arquivo."""
     numeros = re.findall(r"\d+", Path(nome_arquivo).stem)
     return max(numeros, key=len) if numeros else "SEM_NUMERO"
 
-# --- 3. CSS: LOGO DINÂMICA (BRANCA NO ESCURO / PRETA NO CLARO) ---
 st.markdown(
     """
     <style>
@@ -45,13 +40,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- 4. INTERFACE: LOGO ---
-if LOGO_PATH.exists():
-    img_b64 = get_image_base64(str(LOGO_PATH))
-    st.markdown(f'<img src="data:image/png;base64,{img_b64}" class="logo-custom">', unsafe_allow_html=True)
-
-st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
-st.write("---")
 
 # --- 5. ENTRADA DE DADOS E OPÇÕES ---
 try:
