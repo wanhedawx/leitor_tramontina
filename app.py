@@ -65,7 +65,7 @@ def processar_pedido(texto, layout, f_info):
 
 # --- INTERFACE ---
 if LOGO_PATH.exists():
-    col_esq, col_logo, col_dir = st.columns([1, 2, 1])
+    col_esq, col_logo, col_dir = st.columns([2, 2, 1])
     with col_logo:
         st.image(Image.open(str(LOGO_PATH)), width=180)
 
