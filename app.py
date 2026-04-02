@@ -26,9 +26,7 @@ def extrair_texto_pdf(pdf_bytes):
             texto += (p.extract_text() or "") + "\n"
     return texto
 
-# NOVA FUNÇÃO: Extrai o número do pedido do texto
 def extrair_numero_pedido(texto):
-    # Procura padrões como "Pedido: 12345", "Nº Pedido 12345" ou números isolados após palavras-chave
     padroes = [
         r"(?:PEDIDO|NÚMERO|Nº)\s*[:.\-]?\s*(\d+)",
         r"ORDEM\s*VENDAS?\s*[:.\-]?\s*(\d+)"
@@ -55,7 +53,6 @@ def processar_pedido(texto, layout, f_info):
             m = re.match(r"^\d+\s+\d+\s+\d{13}\s+(\d[\d ]+)\s+.+?\-\s+(\d+)", linha.strip())
             if m: 
                 itens.append({"sku": re.sub(r"\D", "", m.group(1)), "quantidade": int(m.group(2))})
-    # ... (outros layouts permanecem iguais)
     
     df = pd.DataFrame(itens)
     if not df.empty:
@@ -65,7 +62,8 @@ def processar_pedido(texto, layout, f_info):
 
 # --- INTERFACE ---
 if LOGO_PATH.exists():
-    col_esq, col_logo, col_dir = st.columns([2, 2, 1])
+    # Centralização corrigida para [1, 2, 1]
+    col_esq, col_logo, col_dir = st.columns([1, 2, 1])
     with col_logo:
         st.image(Image.open(str(LOGO_PATH)), width=180)
 
@@ -84,22 +82,21 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
     
     lista_dfs = []
     arquivos_csv_zip = {}
+    ultimo_num_pedido = "SEM_NUMERO"
 
     for arquivo in arquivos:
         conteudo = arquivo.read()
         texto_pdf = extrair_texto_pdf(conteudo)
         f_info = identificar_fabrica(texto_pdf)
         
-        # Extração de dados para o nome do arquivo
         num_pedido = extrair_numero_pedido(texto_pdf)
-        # Se houver uma coluna 'codigo_cliente' na sua planilha, use ela, senão usamos o nome
-        id_cliente = c_info.get('cnpj_cliente', cliente_original) 
+        ultimo_num_pedido = num_pedido # Guarda para o nome do arquivo individual
 
         if f_info is not None:
             df_individual = processar_pedido(texto_pdf, c_info['layout'], f_info)
             if not df_individual.empty:
-                # Nome do arquivo solicitado: Cliente_Pedido
-                nome_formatado = f"{sel_display.replace(' ', '_')}_{num_pedido}"
+                # Nome para o arquivo dentro do ZIP: CARAJAS_12345
+                nome_formatado = f"{sel_display.replace(' ', '_').upper()}_{num_pedido}"
                 
                 df_consolidado = df_individual.copy()
                 df_consolidado["pedido"] = num_pedido
@@ -112,19 +109,45 @@ if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary",
         else:
             st.error(f"❌ Fábrica não identificada: {arquivo.name}")
 
+    # --- BLOCO DE EXPORTAÇÃO CORRIGIDO ---
     if lista_dfs:
         df_final = pd.concat(lista_dfs, ignore_index=True)
         st.success(f"✅ {len(lista_dfs)} pedido(s) processado(s)!")
         st.dataframe(df_final, use_container_width=True)
         
+        cliente_venda = sel_display.upper()
+        
+        # Define o nome do arquivo consolidado
+        if len(arquivos) == 1:
+            nome_arquivo_final = f"{cliente_venda} {ultimo_num_pedido}"
+        else:
+            nome_arquivo_final = f"{cliente_venda} MULTIPLOS"
+
+        st.write("---")
         col1, col2 = st.columns(2)
+        
         with col1:
             csv_total = df_final.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Baixar Tudo (Consolidado)", csv_total, f"Consolidado_{sel_display}.csv", use_container_width=True)
+            st.download_button(
+                label=f"⬇️ Baixar {nome_arquivo_final}", 
+                data=csv_total,
+                file_name=f"{nome_arquivo_final}.csv", 
+                mime="text/csv",
+                use_container_width=True
+            )
         
         with col2:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
                 for nome, conteudo_csv in arquivos_csv_zip.items():
-                    zf.writestr(nome, conteudo_csv)
-            st.download_button("📦 Baixar Separados (ZIP)", zip_buffer.getvalue(), f"Pedidos_{sel_display}.zip", use_container_width=True)
+                    zf.writestr(nome.upper(), conteudo_csv)
+            
+            st.download_button(
+                label="📦 Baixar Separados (ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name=f"PEDIDOS_{cliente_venda}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+    else:
+        st.warning("⚠️ Nenhum dado extraído.")
