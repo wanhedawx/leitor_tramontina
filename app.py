@@ -23,15 +23,15 @@ def get_image_base64(path):
 def carregar_aba(aba):
     return pd.read_excel(CONFIG_PATH, sheet_name=aba, dtype=str)
 
-def extrair_numero_pedido(texto, nome_arquivo):
-    """Garante que pegue o L75969 do nome e ignore o 000634 interno."""
+def extrair_numero_pedido(nome_arquivo):
+    """Pega o número do pedido direto do nome do arquivo (ex: L75969 -> 75969)."""
     nome_sem_ext = Path(nome_arquivo).stem
     numeros = re.findall(r"\d+", nome_sem_ext)
     if numeros_validos := [n for n in numeros if len(n) >= 4]:
         return max(numeros_validos, key=len)
     return "SEM_NUMERO"
 
-# --- 3. CSS PARA LOGO BRANCA (CORRIGIDO) ---
+# --- 3. CSS PARA LOGO BRANCA (CORRIGIDO PARA MODO CLARO/ESCURO) ---
 st.markdown(
     """
     <style>
@@ -42,15 +42,11 @@ st.markdown(
     }
     /* MODO CLARO: Inverte o BRANCO da logo para PRETO */
     @media (prefers-color-scheme: light) {
-        .logo-custom {
-            filter: invert(1) contrast(2); 
-        }
+        .logo-custom { filter: invert(1) brightness(0.2); }
     }
     /* MODO ESCURO: Mantém a logo BRANCA original */
     @media (prefers-color-scheme: dark) {
-        .logo-custom {
-            filter: none;
-        }
+        .logo-custom { filter: none; }
     }
     </style>
     """,
@@ -65,7 +61,7 @@ if LOGO_PATH.exists():
 st.markdown("<h1 style='text-align: center;'>Processador de Pedidos</h1>", unsafe_allow_html=True)
 st.write("---")
 
-# --- 5. PROCESSAMENTO REAL ---
+# --- 5. LÓGICA DE PROCESSAMENTO ---
 try:
     df_clientes = carregar_aba("clientes")
     opcoes = {c.replace("_", " ").title(): c for c in df_clientes['cliente'].unique()}
@@ -75,23 +71,27 @@ try:
 
     if st.button("🚀 Processar Pedidos", use_container_width=True, type="primary") and arquivos and sel_display:
         cliente_id = opcoes[sel_display]
-        resultados = []
-
+        
         for arquivo in arquivos:
-            texto_pdf = ""
-            with pdfplumber.open(io.BytesIO(arquivo.read())) as pdf:
-                for p in pdf.pages:
-                    texto_pdf += (p.extract_text() or "") + "\n"
+            # 1. Extrai o número do pedido do nome do arquivo
+            num_pedido = extrair_numero_pedido(arquivo.name)
             
-            num_pedido = extrair_numero_pedido(texto_pdf, arquivo.name)
+            # 2. Simulação de processamento (Aqui você mantém sua lógica de extração de itens)
+            # Vamos supor que 'df_final' seja o resultado da sua extração:
+            df_final = pd.DataFrame({"Item": ["Exemplo"], "Qtd": [1]}) 
             
-            # --- INSIRA SUA LÓGICA DE EXTRAÇÃO DE ITENS AQUI ---
-            # Exemplo genérico para não dar erro:
-            dado_ficticio = {"Pedido": num_pedido, "Status": "Processado"}
-            resultados.append(dado_ficticio)
-            
-        st.success(f"{len(arquivos)} pedido(s) lido(s) com sucesso!")
-        st.dataframe(pd.DataFrame(resultados))
+            st.success(f"Pedido {num_pedido} processado!")
+            st.dataframe(df_final)
+
+            # 3. BOTÃO DE BAIXAR O ARQUIVO (O QUE FALTAVA!)
+            csv = df_final.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Baixar CSV Pedido {num_pedido}",
+                data=csv,
+                file_name=f"PEDIDO_{cliente_id.upper()}_{num_pedido}.csv",
+                mime="text/csv",
+                key=f"btn_{num_pedido}" # Key única para não dar erro no loop
+            )
 
 except Exception as e:
     st.error(f"Erro no sistema: {e}")
