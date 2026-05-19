@@ -213,11 +213,10 @@ if processar:
 
         nome_limpo = Path(arquivo.name).stem
 
-        df_consolidado_parte = df_individual.copy()
-        df_consolidado_parte["arquivo_origem"] = nome_limpo
+        # Adiciona no consolidado SEM coluna de nome do arquivo
+        lista_dfs.append(df_individual.copy())
 
-        lista_dfs.append(df_consolidado_parte)
-
+        # Guarda o CSV individual também SEM coluna de nome do arquivo
         csv_buffer = io.StringIO()
         df_individual.to_csv(csv_buffer, index=False, encoding="utf-8-sig")
         arquivos_csv_zip[f"{nome_limpo}.csv"] = csv_buffer.getvalue()
